@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <title>直播间</title>
+  <link rel="stylesheet" href="/css/room.css">
+</head>
+<body>
+  <div class="phone" id="phone">
+    <!-- 舞台：视频铺满，UI 叠在上面 -->
+    <section class="stage" id="stage">
+      <div class="video-wrap" id="videoWrap">
+        <div class="video-placeholder" id="videoPlaceholder">加载中…</div>
+      </div>
+
+      <!-- 透明拦截层：让点击不会传到播放器，从而无法暂停（像直播） -->
+      <div class="video-guard" id="videoGuard" hidden></div>
+
+      <!-- 顶栏（叠加） -->
+      <header class="topbar">
+        <div class="room-info">
+          <div class="room-name" id="roomName">直播间</div>
+          <div class="course-title" id="courseTitle"></div>
+        </div>
+        <div class="status-line">
+          <span class="status-badge" id="statusBadge">连接中</span>
+          <span class="viewers"><span class="eye">👁</span> <span id="viewerCount">0</span></span>
+        </div>
+      </header>
+
+      <!-- 课程标题大字 banner（叠加在视频中上方） -->
+      <div class="title-banner" id="titleBanner" hidden>
+        <div class="tb-title" id="tbTitle"></div>
+        <div class="tb-sub" id="tbSub"></div>
+      </div>
+
+      <!-- 互动评论流（叠加在视频下半部） -->
+      <div class="feed-overlay">
+        <span class="feed-hint" id="feedHint"></span>
+        <div class="feed" id="feed"></div>
+      </div>
+
+      <!-- 进入直播间遮罩 -->
+      <div class="enter-mask" id="enterMask" hidden>
+        <div class="enter-card">
+          <div class="enter-live-dot"></div>
+          <div class="enter-title" id="enterTitle">直播进行中</div>
+          <div class="enter-sub" id="enterSub">点击进入，和大家一起看</div>
+          <button class="enter-btn" id="enterBtn">进入直播间</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 底部评论输入 -->
+    <footer class="composer">
+      <input id="commentInput" class="comment-input" type="text"
+             placeholder="说点什么…" maxlength="200" autocomplete="off">
+      <button id="flowerBtn" class="icon-btn" aria-label="送小花">🌸</button>
+      <button id="likeBtn" class="icon-btn" aria-label="点赞">❤️</button>
+      <button id="sendBtn" class="send-btn">发送</button>
+    </footer>
+
+    <!-- 点赞/送花 飘动图层 -->
+    <div class="float-layer" id="floatLayer"></div>
+  </div>
+
+  <!-- 观看码准入门（开启时拦在最前面） -->
+  <div class="gate-mask" id="gateMask" hidden>
+    <div class="gate-card">
+      <div class="gate-logo">🔒</div>
+      <div class="gate-title">输入观看码进入直播间</div>
+      <div class="gate-sub">本场直播为专属观看，请输入收到的观看码</div>
+      <input id="gateInput" class="gate-input" type="text" placeholder="请输入观看码" autocomplete="off" maxlength="40">
+      <button id="gateBtn" class="gate-btn">进入直播间</button>
+      <div class="gate-err" id="gateErr"></div>
+    </div>
+  </div>
+
+  <!-- 首次评论填昵称弹层 -->
+  <div class="modal-mask" id="nameModal" hidden>
+    <div class="modal">
+      <div class="modal-title">取个昵称再发言吧</div>
+      <input id="nickInput" class="modal-input" type="text" placeholder="昵称（必填）" maxlength="20">
+      <input id="regionInput" class="modal-input" type="text" placeholder="地区（可选，如：吉隆坡）" maxlength="20">
+      <div class="modal-actions">
+        <button id="nickCancel" class="btn-ghost">取消</button>
+        <button id="nickOk" class="btn-primary">开始互动</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/js/room.js"></script>
+</body>
+</html>

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>直播间后台管理</title>
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+  <!-- 登录 -->
+  <div class="login-mask" id="loginMask" hidden>
+    <div class="login-card">
+      <h1>直播间后台</h1>
+      <input id="pwd" class="inp" type="password" placeholder="管理密码">
+      <button id="loginBtn" class="btn btn-primary block">登录</button>
+      <div class="login-err" id="loginErr"></div>
+    </div>
+  </div>
+
+  <!-- 主体 -->
+  <div class="app" id="app" hidden>
+    <header class="appbar">
+      <div class="brand">📺 直播间后台</div>
+      <nav class="tabs" id="manageTabs" hidden>
+        <button class="tab active" data-tab="room">直播间配置</button>
+        <button class="tab" data-tab="presets">预设互动</button>
+        <button class="tab" data-tab="comments">用户评论</button>
+        <button class="tab" data-tab="codes">观看码</button>
+      </nav>
+      <div class="appbar-right">
+        <button id="backToListBtn" class="btn btn-ghost sm" hidden>← 直播间列表</button>
+        <button id="logoutBtn" class="btn btn-ghost sm">退出</button>
+      </div>
+    </header>
+
+    <main class="content">
+      <!-- ===== 一级：直播间列表 ===== -->
+      <section id="roomsView">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>我的直播间</h2>
+            <button id="createRoomBtn" class="btn btn-primary sm">+ 创建直播间</button>
+          </div>
+          <p class="tip">每个直播间独立配置、独立预设/评论/观看码，并有专属链接。点「管理」进入配置。</p>
+          <div class="table-wrap">
+            <table class="tbl">
+              <thead><tr>
+                <th>名称</th><th>状态</th><th>链接</th><th>预设</th><th>观看码</th><th>操作</th>
+              </tr></thead>
+              <tbody id="roomRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 二级：直播间管理 ===== -->
+      <section id="manageView" hidden>
+        <div class="manage-head">
+          <span>正在管理：<b id="manageRoomName"></b></span>
+          <span class="manage-link">链接 <code id="manageRoomLink"></code></span>
+          <button id="copyLinkBtn" class="btn btn-ghost sm">复制链接</button>
+          <a id="openRoomLink" class="btn btn-ghost sm" target="_blank">↗ 打开</a>
+        </div>
+
+      <!-- 直播间配置 -->
+      <section class="panel" data-panel="room">
+        <h2>直播间配置</h2>
+        <div class="form">
+          <label>直播间名称<input id="r_name" class="inp"></label>
+          <label>课程标题（顶栏小字）<input id="r_courseTitle" class="inp"></label>
+          <label>大字标题（视频中上方 banner，留空则不显示）<input id="r_bannerTitle" class="inp" maxlength="30"></label>
+          <label>大字副标题（可多行，换行用回车）
+            <textarea id="r_bannerSubtitle" class="inp ta" rows="2" maxlength="120"></textarea>
+          </label>
+          <div class="row">
+            <label>直播状态
+              <select id="r_status" class="inp">
+                <option value="pre">未开播</option>
+                <option value="live">直播中</option>
+                <option value="ended">已结束</option>
+              </select>
+            </label>
+            <label>观看人数（基数）<input id="r_viewerBase" class="inp" type="number" min="0"></label>
+          </div>
+          <label>封面图 URL（可选）<input id="r_cover" class="inp" placeholder="https://..."></label>
+          <label>视频嵌入代码 / 链接（Voomly：贴 iframe、script、分享链接或视频ID 都行）
+            <textarea id="r_videoEmbed" class="inp ta" rows="6" placeholder="把 Voomly 后台的嵌入代码整段粘贴进来即可（iframe / script / 分享链接 / 视频ID 都支持）"></textarea>
+          </label>
+          <label>视频方向
+            <select id="r_orientation" class="inp">
+              <option value="portrait">竖屏（9:16，沉浸式）</option>
+              <option value="landscape">横屏（16:9）</option>
+            </select>
+          </label>
+          <label class="chk"><input id="r_requireAccessCode" type="checkbox"> 需要观看码才能进入（开启后没有有效观看码的人进不来，到「观看码」标签页管理）</label>
+          <div class="live-row">
+            <div class="live-info">当前开播时间：<span id="r_liveStartAt">未开播</span></div>
+            <div class="live-btns">
+              <button id="goLiveBtn" class="btn btn-live">🔴 立即开播</button>
+            </div>
+          </div>
+          <button id="saveRoomBtn" class="btn btn-primary">保存配置</button>
+        </div>
+      </section>
+
+      <!-- 预设互动 -->
+      <section class="panel" data-panel="presets" hidden>
+        <div class="panel-head">
+          <h2>预设互动管理</h2>
+          <div class="actions">
+            <button id="addPresetBtn" class="btn btn-primary sm">+ 新增</button>
+            <button id="exportBtn" class="btn btn-ghost sm">导出 JSON</button>
+            <button id="importBtn" class="btn btn-ghost sm">导入 JSON</button>
+          </div>
+        </div>
+        <p class="tip">「出现时间」= 开播后第几秒弹出。类型：comment 评论 / join 进入直播间 / like 点赞。</p>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>时间(秒)</th><th>昵称</th><th>地区</th><th>内容</th><th>类型</th><th>启用</th><th>操作</th>
+            </tr></thead>
+            <tbody id="presetRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 用户评论 -->
+      <section class="panel" data-panel="comments" hidden>
+        <div class="panel-head">
+          <h2>用户评论管理</h2>
+          <button id="refreshCommentsBtn" class="btn btn-ghost sm">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>时间</th><th>昵称</th><th>地区</th><th>内容</th><th>状态</th><th>操作</th>
+            </tr></thead>
+            <tbody id="commentRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 观看码 -->
+      <section class="panel" data-panel="codes" hidden>
+        <div class="panel-head">
+          <h2>观看码管理</h2>
+          <div class="actions">
+            <button id="addCodeBtn" class="btn btn-primary sm">+ 新增</button>
+            <button id="exportCodesBtn" class="btn btn-ghost sm">导出 JSON</button>
+            <button id="importCodesBtn" class="btn btn-ghost sm">导入 JSON</button>
+          </div>
+        </div>
+        <p class="tip">观看码绑定昵称+地区，发给用户后用它进入（替代登录），进入后弹幕用绑定的身份。有效期到期后自动失效。先在「直播间配置」勾选「需要观看码才能进入」才会生效。</p>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>观看码</th><th>昵称</th><th>地区</th><th>有效期</th><th>状态</th><th>已用次数</th><th>操作</th>
+            </tr></thead>
+            <tbody id="codeRows"></tbody>
+          </table>
+        </div>
+      </section>
+      </section><!-- /manageView -->
+    </main>
+  </div>
+
+  <!-- 观看码编辑弹层 -->
+  <div class="modal-mask" id="codeModal" hidden>
+    <div class="modal">
+      <h3 id="codeModalTitle">新增观看码</h3>
+      <label>观看码（留空自动生成）<input id="c_code" class="inp" maxlength="40" placeholder="留空则自动生成，如 VIP888"></label>
+      <div class="row">
+        <label>昵称<input id="c_nickname" class="inp" maxlength="20"></label>
+        <label>地区<input id="c_region" class="inp" maxlength="20"></label>
+      </div>
+      <label>有效期至（留空 = 永久有效）<input id="c_expireAt" class="inp" type="datetime-local"></label>
+      <label>备注（可选）<input id="c_note" class="inp" maxlength="60"></label>
+      <label class="chk"><input id="c_enabled" type="checkbox" checked> 启用</label>
+      <div class="modal-actions">
+        <button id="codeCancel" class="btn btn-ghost">取消</button>
+        <button id="codeSave" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 观看码导入弹层 -->
+  <div class="modal-mask" id="codeImportModal" hidden>
+    <div class="modal">
+      <h3>批量导入观看码</h3>
+      <p class="tip">粘贴 JSON 数组，字段：code（可省略自动生成）, nickname, region, expireAt（毫秒时间戳，可省略=永久）, enabled, note。</p>
+      <textarea id="codeImportText" class="inp ta" rows="8" placeholder='[{"code":"VIP001","nickname":"张三","region":"吉隆坡","enabled":true}]'></textarea>
+      <label class="chk"><input id="codeImportReplace" type="checkbox"> 覆盖现有（不勾选=追加）</label>
+      <div class="modal-actions">
+        <button id="codeImportCancel" class="btn btn-ghost">取消</button>
+        <button id="codeImportDo" class="btn btn-primary">导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 预设编辑弹层 -->
+  <div class="modal-mask" id="presetModal" hidden>
+    <div class="modal">
+      <h3 id="presetModalTitle">新增预设互动</h3>
+      <div class="row">
+        <label>出现时间(秒)<input id="p_time" class="inp" type="number" min="0"></label>
+        <label>类型
+          <select id="p_type" class="inp">
+            <option value="comment">评论</option>
+            <option value="join">进入直播间</option>
+            <option value="like">点赞</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label>昵称<input id="p_nickname" class="inp"></label>
+        <label>地区<input id="p_region" class="inp"></label>
+      </div>
+      <label>头像 URL（可选）<input id="p_avatar" class="inp" placeholder="留空则用昵称首字"></label>
+      <label>内容<textarea id="p_content" class="inp ta" rows="3"></textarea></label>
+      <label class="chk"><input id="p_enabled" type="checkbox" checked> 启用</label>
+      <div class="modal-actions">
+        <button id="presetCancel" class="btn btn-ghost">取消</button>
+        <button id="presetSave" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入弹层 -->
+  <div class="modal-mask" id="importModal" hidden>
+    <div class="modal">
+      <h3>批量导入预设互动</h3>
+      <p class="tip">粘贴 JSON 数组，字段：time, nickname, region, content, type, enabled, avatar。</p>
+      <textarea id="importText" class="inp ta" rows="8" placeholder='[{"time":5,"nickname":"小明","region":"广东","content":"老师好","type":"comment","enabled":true}]'></textarea>
+      <label class="chk"><input id="importReplace" type="checkbox"> 覆盖现有（不勾选=追加）</label>
+      <div class="modal-actions">
+        <button id="importCancel" class="btn btn-ghost">取消</button>
+        <button id="importDo" class="btn btn-primary">导入</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <script src="/js/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+:root {
+  --bg: #f4f5f9;
+  --card: #fff;
+  --line: #e6e8f0;
+  --text: #1f2330;
+  --muted: #8990a6;
+  --brand: #5b6cff;
+  --brand-d: #4453e6;
+  --live: #ff3b6b;
+  --ok: #18a957;
+  --warn: #e6a700;
+}
+* { box-sizing: border-box; }
+
+/* 关键：让 hidden 属性始终生效（覆盖 .login-mask/.modal-mask 的 display:flex） */
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+}
+
+/* 登录 */
+.login-mask {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #5b6cff, #8a5bff); padding: 20px;
+}
+.login-card {
+  background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 340px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+.login-card h1 { margin: 0 0 18px; font-size: 19px; text-align: center; }
+.login-err { color: var(--live); font-size: 13px; margin-top: 10px; min-height: 18px; text-align: center; }
+
+/* 顶栏 */
+.appbar {
+  position: sticky; top: 0; z-index: 10; background: #fff; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 16px; padding: 0 18px; height: 56px;
+}
+.brand { font-weight: 700; font-size: 16px; flex: 0 0 auto; }
+.tabs { display: flex; gap: 4px; flex: 1 1 auto; }
+.tab {
+  border: 0; background: transparent; padding: 8px 14px; border-radius: 8px;
+  font-size: 14px; color: var(--muted); cursor: pointer;
+}
+.tab.active { background: #eef0ff; color: var(--brand); font-weight: 600; }
+.appbar-right { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+.link { color: var(--brand); text-decoration: none; font-size: 13px; }
+
+/* 内容 */
+.content { max-width: 1000px; margin: 0 auto; padding: 22px 18px 60px; }
+
+/* 直播间管理头部 */
+.manage-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 16px; padding: 12px 16px; background: #eef0ff; border-radius: 12px; font-size: 13px;
+}
+.manage-head b { font-size: 15px; }
+.manage-head .manage-link { color: #5a6072; }
+.manage-head code, .tbl code { background: #fff; padding: 2px 8px; border-radius: 6px; color: #4453e6; font-size: 12px; }
+.tbl code { background: #f0f1f7; }
+.tbl .roomname { font-weight: 600; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+.panel h2 { margin: 0 0 16px; font-size: 17px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
+.panel-head h2 { margin: 0; }
+.actions { display: flex; gap: 8px; }
+.tip { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+
+/* 表单 */
+.form { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #5a6072; }
+.row { display: flex; gap: 14px; }
+.row > label { flex: 1; }
+.inp {
+  border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; font-size: 14px;
+  color: var(--text); background: #fbfbfe; font-family: inherit;
+}
+.inp:focus { outline: none; border-color: var(--brand); background: #fff; }
+.ta { resize: vertical; line-height: 1.5; }
+.chk { flex-direction: row; align-items: center; gap: 8px; color: var(--text); }
+.live-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; background: #fff5f8; border: 1px solid #ffd9e4; border-radius: 10px; padding: 14px; }
+.live-row .live-info { font-size: 13px; color: #5a6072; flex: 1 1 100%; }
+.live-row .sched { flex: 1 1 200px; gap: 6px; }
+.live-row .live-btns { display: flex; gap: 10px; flex: 0 0 auto; }
+#r_liveStartAt { font-weight: 600; color: var(--text); }
+
+/* 按钮 */
+.btn { border: 0; border-radius: 9px; padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.btn.sm { padding: 6px 12px; font-size: 13px; }
+.btn.block { width: 100%; margin-top: 6px; }
+.btn-primary { background: var(--brand); color: #fff; }
+.btn-primary:hover { background: var(--brand-d); }
+.btn-ghost { background: #eef0f5; color: #50566b; }
+.btn-ghost:hover { background: #e3e6ef; }
+.btn-live { background: var(--live); color: #fff; }
+.btn-danger { background: #ffe9ee; color: var(--live); }
+.btn-danger:hover { background: #ffd9e2; }
+
+/* 表格 */
+.table-wrap { overflow-x: auto; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl th, .tbl td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.tbl th { color: var(--muted); font-weight: 600; white-space: nowrap; background: #fafbff; }
+.tbl td .cell-content { max-width: 340px; white-space: pre-wrap; word-break: break-word; }
+.tbl .op { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 12px; }
+.tag.comment { background: #eef0ff; color: var(--brand); }
+.tag.join { background: #fff3e6; color: #d98300; }
+.tag.like { background: #ffeaf0; color: var(--live); }
+.tag.visible { background: #e6f7ee; color: var(--ok); }
+.tag.hidden { background: #f0f0f4; color: #98a; }
+.mini { border: 0; background: #eef0f5; color: #50566b; border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; }
+.mini:hover { background: #e3e6ef; }
+.mini.danger { background: #ffe9ee; color: var(--live); }
+.mini.ok { background: #e6f7ee; color: var(--ok); }
+.switch { cursor: pointer; }
+
+/* 弹层 */
+.modal-mask { position: fixed; inset: 0; z-index: 50; background: rgba(20, 24, 40, 0.5); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal { background: #fff; border-radius: 14px; padding: 22px; width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; }
+.modal h3 { margin: 0 0 16px; font-size: 16px; }
+.modal label { margin-bottom: 12px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+
+/* toast */
+.toast {
+  position: fixed; left: 50%; top: 70px; transform: translateX(-50%);
+  background: #1f2330; color: #fff; padding: 9px 18px; border-radius: 10px;
+  font-size: 13px; z-index: 80; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+}
+
+@media (max-width: 640px) {
+  .appbar { flex-wrap: wrap; height: auto; padding: 10px; gap: 8px; }
+  .tabs { order: 3; width: 100%; }
+  .row { flex-direction: column; gap: 14px; }
+}

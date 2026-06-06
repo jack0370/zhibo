@@ -1,0 +1,22 @@
+# Render 一键蓝图：连接 Git 仓库后会按此自动建服务
+# 注意：持久磁盘(disk)需要付费实例(plan: starter)，free 实例不支持磁盘且会休眠
+services:
+  - type: web
+    name: zhibo-live
+    runtime: node
+    plan: starter
+    region: singapore        # 面向东南亚观众；也可改 oregon / frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data     # 数据写到持久磁盘
+      - key: ADMIN_PASSWORD
+        sync: false          # 在 Render 面板里手动填，不写进仓库
+    disk:
+      name: zhibo-data
+      mountPath: /var/data   # 持久磁盘挂载点，需与 DATA_DIR 一致
+      sizeGB: 1

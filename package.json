@@ -1,0 +1,19 @@
+{
+  "name": "zhibo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "私域直播互动直播间 MVP：录播视频 + 预设互动 + 真实评论",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.2"
+  }
+}
