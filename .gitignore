@@ -3,3 +3,4 @@ data/db.json
 npm-debug.log*
 .DS_Store
 *.log
+probe*.mjs

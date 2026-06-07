@@ -215,17 +215,25 @@ function buildVoomlyIframe(input) {
   const type = first(/data-type="([^"]+)"/i, /[?&]type=([^"&\s]+)/i) || 'v';
   let skin = first(/data-skin-color="([^"]+)"/i, /[?&]skinColor=([^"&\s]+)/i) || '#008EFF';
   try { skin = decodeURIComponent(skin); } catch (e) { /* 保持原样 */ }
-  const src = 'https://embed.voomly.com/embed/assets/embed.html'
+  let src = 'https://embed.voomly.com/embed/assets/embed.html'
     + `?videoId=${encodeURIComponent(id)}&videoRatio=${encodeURIComponent(ratio)}`
     + `&type=${encodeURIComponent(type)}&skinColor=${encodeURIComponent(skin)}&autoplay=1`;
+  // 直播中：用全局直播时钟定位起播点（t=已播秒数），让晚进/重进的人都落在当前进度，像真直播。
+  // 已结束(回放)从头看，未开播不加 t。Voomly 仅支持 t 参数（已验证）。
+  if (state.room && state.room.status === 'live') {
+    const t = elapsedSec();
+    if (t > 0) src += '&t=' + t;
+  }
   return `<iframe src="${src}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0" title="live"></iframe>`;
 }
 
 function injectVideo() {
   const wrap = $('#videoWrap');
+  const guard = $('#videoGuard'); // 先存住拦截层：setEmbedHTML 会清空 wrap 把它一起删掉
   if (state.room.videoEmbed && state.room.videoEmbed.trim()) {
     const code = buildVoomlyIframe(state.room.videoEmbed) || state.room.videoEmbed;
     setEmbedHTML(wrap, code); // Voomly 统一转 iframe；其它平台原样注入
+    if (guard) wrap.appendChild(guard); // 重新挂回拦截层，作为 wrap 末位子节点盖在视频上
     fitVideoCover();
     // 脚本型嵌入会异步插入 iframe，定时 + 监听 DOM 变化随时重新铺满
     setTimeout(fitVideoCover, 400);
@@ -261,6 +269,12 @@ function fitVideoCover() {
   el.style.transform = 'translate(-50%, -50%)';
   el.style.width = Math.ceil(w) + 'px'; el.style.height = Math.ceil(h) + 'px';
   el.style.maxWidth = 'none'; el.style.maxHeight = 'none';
+  // 防暂停拦截层：尺寸/位置与视频本体完全一致，连溢出舞台的部分也盖住
+  const guard = $('#videoGuard');
+  if (guard) {
+    guard.style.width = Math.ceil(w) + 'px';
+    guard.style.height = Math.ceil(h) + 'px';
+  }
 }
 window.addEventListener('resize', fitVideoCover);
 
@@ -278,11 +292,40 @@ function startLiveFeed() {
   ensurePolling();
   if (!state.tickTimer) state.tickTimer = setInterval(revealDuePresets, 1000);
   $('#feedHint').textContent = state.room.status === 'ended' ? '直播已结束 · 回放中' : '直播进行中';
-  // 直播中：等视频自动播放起来后，盖上透明拦截层，点画面不会暂停（像真直播）。
-  // 延迟 2.5s 是给自动播放/手动起播留出窗口，避免封面播放键被挡住。回放(ended)不锁，方便拖进度。
+  // 直播中：盖上透明拦截层，点画面不会暂停（像真直播）。回放(ended)不锁，方便拖进度。
   if (state.room.status !== 'ended') {
-    setTimeout(() => { $('#videoGuard').hidden = false; }, 2500);
+    armAntiPauseGuard();
   }
+}
+
+// 只有「确认视频真的在播放」之后，才盖上防暂停拦截层。
+// 为什么不再用固定延时：手机端(尤其微信/iOS)常拦截自动播放，视频会停在封面 + 中间一个播放键，
+// 必须用户手点才起播。若按固定 2.5s 盖下去，拦截层会盖死那个播放键 → 用户点不动 → 卡死在封面
+// （线上手机端实测踩过的坑）。改为：Voomly 跨域 iframe 播放时会持续发 voomly:video:timeUpdate，
+// 连续两次 time 小幅前进即可断定在播（大跳变是 t 起播点的 seek，排除）。检测不到就永不盖，
+// 最坏只退化为「能暂停」，绝不会再卡死封面。
+function armAntiPauseGuard() {
+  let lastTU = null;
+  let armed = false;
+  function onMsg(e) {
+    // 只认 voomly.com 及其子域，按域名边界匹配（防 evilvoomly.com 之类擦边）
+    let host = '';
+    try { host = new URL(e.origin).host; } catch (_) { return; }
+    if (host !== 'voomly.com' && !host.endsWith('.voomly.com')) return;
+    const d = e.data;
+    if (!d || d.eventName !== 'voomly:video:timeUpdate') return;
+    const t = d.payload && d.payload.time;
+    if (typeof t !== 'number') return;
+    // 连续两次 timeUpdate 之间小幅前进 = 正在播放；>3s 的跳变是 seek（含 t 起播点定位），忽略
+    if (!armed && lastTU != null && t > lastTU && t - lastTU < 3) {
+      armed = true;
+      window.removeEventListener('message', onMsg); // 盖一次就够，撤掉监听
+      const guard = $('#videoGuard');
+      if (guard) { guard.hidden = false; fitVideoCover(); }
+    }
+    lastTU = t;
+  }
+  window.addEventListener('message', onMsg);
 }
 
 // 绑定「进入直播间」按钮

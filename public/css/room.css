@@ -40,7 +40,8 @@ html, body {
 }
 
 /* 透明拦截层：盖在视频上，吃掉点击，防止暂停播放器 */
-.video-guard { position: absolute; inset: 0; z-index: 2; background: transparent; }
+/* 拦截层尺寸由 JS(fitVideoCover) 设为与视频本体完全一致；z-index 高于视频，吃掉点击 */
+.video-guard { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 4; background: transparent; }
 
 /* 顶栏叠加 */
 .topbar {

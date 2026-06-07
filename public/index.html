@@ -13,10 +13,9 @@
     <section class="stage" id="stage">
       <div class="video-wrap" id="videoWrap">
         <div class="video-placeholder" id="videoPlaceholder">加载中…</div>
+        <!-- 透明拦截层：尺寸跟随视频本体，点击不传到播放器，无法暂停（像真直播） -->
+        <div class="video-guard" id="videoGuard" hidden></div>
       </div>
-
-      <!-- 透明拦截层：让点击不会传到播放器，从而无法暂停（像直播） -->
-      <div class="video-guard" id="videoGuard" hidden></div>
 
       <!-- 顶栏（叠加） -->
       <header class="topbar">
