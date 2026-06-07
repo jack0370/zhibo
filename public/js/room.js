@@ -298,14 +298,13 @@ function startLiveFeed() {
   }
 }
 
-// 只有「确认视频真的在播放」之后，才盖上防暂停拦截层。
-// 为什么不再用固定延时：手机端(尤其微信/iOS)常拦截自动播放，视频会停在封面 + 中间一个播放键，
-// 必须用户手点才起播。若按固定 2.5s 盖下去，拦截层会盖死那个播放键 → 用户点不动 → 卡死在封面
-// （线上手机端实测踩过的坑）。改为：Voomly 跨域 iframe 播放时会持续发 voomly:video:timeUpdate，
-// 连续两次 time 小幅前进即可断定在播（大跳变是 t 起播点的 seek，排除）。检测不到就永不盖，
-// 最坏只退化为「能暂停」，绝不会再卡死封面。
+// 只有「用户开启了声音」之后，才盖上防暂停拦截层。
+// 为什么以「开声音」为信号：手机浏览器只允许静音自动播放（铁规矩），Voomly 静音起播并显示自带的
+// 「开启声音」按钮，必须用户手点才有声。拦截层会盖死整个视频（含那个开声音按钮、以及 autoplay 被
+// 拦时的封面播放键），所以必须等用户完成「点开声音」这一步、确实有声了，再盖——既不挡开声音/起播，
+// 又保留防暂停。信号用 Voomly 的 voomly:video:volumeChanged 事件里 muted:false（手机端只有用户
+// 手动解除静音才会出现）。检测不到就永不盖，最坏只退化为「能暂停 / 静音可控」，绝不卡死、绝不哑播。
 function armAntiPauseGuard() {
-  let lastTU = null;
   let armed = false;
   function onMsg(e) {
     // 只认 voomly.com 及其子域，按域名边界匹配（防 evilvoomly.com 之类擦边）
@@ -313,17 +312,14 @@ function armAntiPauseGuard() {
     try { host = new URL(e.origin).host; } catch (_) { return; }
     if (host !== 'voomly.com' && !host.endsWith('.voomly.com')) return;
     const d = e.data;
-    if (!d || d.eventName !== 'voomly:video:timeUpdate') return;
-    const t = d.payload && d.payload.time;
-    if (typeof t !== 'number') return;
-    // 连续两次 timeUpdate 之间小幅前进 = 正在播放；>3s 的跳变是 seek（含 t 起播点定位），忽略
-    if (!armed && lastTU != null && t > lastTU && t - lastTU < 3) {
+    if (!d || d.eventName !== 'voomly:video:volumeChanged') return;
+    // muted 明确为 false = 用户开了声音，这时才上锁
+    if (!armed && d.payload && d.payload.muted === false) {
       armed = true;
       window.removeEventListener('message', onMsg); // 盖一次就够，撤掉监听
       const guard = $('#videoGuard');
       if (guard) { guard.hidden = false; fitVideoCover(); }
     }
-    lastTU = t;
   }
   window.addEventListener('message', onMsg);
 }
