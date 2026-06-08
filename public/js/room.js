@@ -60,6 +60,9 @@ const state = {
   presets: [],         // 已按 time 排序
   shownPresetIds: new Set(),
   shownCommentIds: new Set(),
+  commentTimeline: [],      // 真实评论按 createdAt−liveStartAt 排到时间线（与预设同一套揭示）
+  timelineIds: new Set(),   // 已收进时间线的评论 id（去重）
+  commentsBackfilled: false, // 首批历史是否已回填
   lastCommentTs: 0,
   entered: false,
   countdownTimer: null, // 预约开播倒计时
@@ -143,16 +146,55 @@ function backfillHistory(maxShow = 15) {
   scrollToBottom(true);
 }
 
-/* ============================ 拉取真实评论 ============================ */
+/* ============================ 拉取真实评论（对齐到时间线） ============================ */
+// 真实评论按「开播后第几秒」定位：offset = createdAt − liveStartAt（未开播则 0）。
+// 这样迟到/重进者看到的评论流与视频进度一致，而不是把历史一次性倒出来。
+function commentTime(createdAt) {
+  if (!state.room.liveStartAt) return 0;
+  return Math.max(0, Math.floor((createdAt - state.room.liveStartAt) / 1000));
+}
+
+// 揭示「到点」的真实评论（与 revealDuePresets 同构）
+function revealDueComments() {
+  const e = state.room.status === 'ended' ? Infinity : elapsedSec();
+  for (const c of state.commentTimeline) {
+    if (state.shownCommentIds.has(c.id)) continue;
+    if (c.time <= e) {
+      state.shownCommentIds.add(c.id);
+      appendComment({ nickname: c.nickname, region: c.region, content: c.content });
+    }
+  }
+}
+
+// 进场回填：已发生过的真实评论只补最近 N 条，其余标记已显示（与 backfillHistory 同构）
+function backfillComments(maxShow = 15) {
+  const e = state.room.status === 'ended' ? Infinity : elapsedSec();
+  const past = state.commentTimeline.filter((c) => c.time <= e && !state.shownCommentIds.has(c.id));
+  const showIds = new Set(past.slice(-maxShow).map((c) => c.id));
+  for (const c of past) {
+    state.shownCommentIds.add(c.id); // 全部标记已显示，避免重复
+    if (showIds.has(c.id)) appendComment({ nickname: c.nickname, region: c.region, content: c.content });
+  }
+}
+
 async function pollComments() {
   try {
     const data = await api.get('/api/comments?room=' + ROOM_ID + '&since=' + state.lastCommentTs);
+    let added = false;
     for (const c of data.comments) {
-      if (state.shownCommentIds.has(c.id)) continue;
-      state.shownCommentIds.add(c.id);
       if (c.createdAt > state.lastCommentTs) state.lastCommentTs = c.createdAt;
-      // 自己的评论已乐观渲染，跳过（按 clientId 无法判断，这里用 id 去重已足够）
-      appendComment({ nickname: c.nickname, region: c.region, content: c.content });
+      // 自己的(已乐观显示)或已收进时间线的，跳过（用 id 去重）
+      if (state.shownCommentIds.has(c.id) || state.timelineIds.has(c.id)) continue;
+      state.timelineIds.add(c.id);
+      state.commentTimeline.push({ id: c.id, time: commentTime(c.createdAt), nickname: c.nickname, region: c.region, content: c.content });
+      added = true;
+    }
+    if (added) state.commentTimeline.sort((a, b) => a.time - b.time);
+    if (!state.commentsBackfilled) {
+      backfillComments();            // 首批：只补最近历史
+      state.commentsBackfilled = true;
+    } else if (added) {
+      revealDueComments();           // 之后：新评论到点即揭示（直播边缘=实时）
     }
   } catch (e) { /* 忽略轮询错误 */ }
 }
@@ -374,7 +416,7 @@ function startLiveFeed() {
   state.entered = true;
   backfillHistory();
   ensurePolling();
-  if (!state.tickTimer) state.tickTimer = setInterval(revealDuePresets, 1000);
+  if (!state.tickTimer) state.tickTimer = setInterval(() => { revealDuePresets(); revealDueComments(); }, 1000);
   $('#feedHint').textContent = state.room.status === 'ended' ? '直播已结束 · 回放中' : '直播进行中';
   // 直播中：进场即盖上透明拦截层，任何平台都点不动、无法暂停（像真直播）。回放(ended)不锁，方便拖进度。
   // 开声音不再依赖拦截层让路 —— 由我们自己的 #soundBtn(在 guard 之上) 调 api.unmute() 接管。
