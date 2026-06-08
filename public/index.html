@@ -15,6 +15,8 @@
         <div class="video-placeholder" id="videoPlaceholder">加载中…</div>
         <!-- 透明拦截层：尺寸跟随视频本体，点击不传到播放器，无法暂停（像真直播） -->
         <div class="video-guard" id="videoGuard" hidden></div>
+        <!-- 开启声音：拦截层盖住原生开声键，由本按钮(z-index 更高)接管 → 点击调 api.unmute() -->
+        <button class="sound-btn" id="soundBtn" hidden>🔊 点击开启声音</button>
       </div>
 
       <!-- 顶栏（叠加） -->
@@ -39,6 +41,17 @@
       <div class="feed-overlay">
         <span class="feed-hint" id="feedHint"></span>
         <div class="feed" id="feed"></div>
+      </div>
+
+      <!-- 预约开播倒计时（封面背景，到点自动开播） -->
+      <div class="countdown-mask" id="countdownMask" hidden>
+        <div class="countdown-card">
+          <div class="countdown-pill">即将开始</div>
+          <div class="countdown-title" id="countdownTitle"></div>
+          <div class="countdown-sub" id="countdownSub"></div>
+          <div class="countdown-timer" id="countdownTimer">--:--:--</div>
+          <div class="countdown-hint">到点自动开始，先不要离开哦</div>
+        </div>
       </div>
 
       <!-- 进入直播间遮罩 -->

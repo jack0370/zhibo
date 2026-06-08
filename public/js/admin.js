@@ -140,7 +140,11 @@ async function loadRoom() {
   $('#r_videoEmbed').value = r.videoEmbed || '';
   $('#r_orientation').value = r.orientation || 'landscape';
   $('#r_requireAccessCode').checked = !!r.requireAccessCode;
-  $('#r_liveStartAt').textContent = r.liveStartAt ? fmtTime(r.liveStartAt) + '（已开播）' : '未开播';
+  $('#r_liveStartAt_input').value = r.liveStartAt ? toLocalInput(r.liveStartAt) : '';
+  // 只读提示：区分「已开播 / 已预约（未来时间）/ 未设」
+  let lbl = '未开播';
+  if (r.liveStartAt) lbl = fmtTime(r.liveStartAt) + (r.liveStartAt > Date.now() ? '（已预约）' : '（已开播）');
+  $('#r_liveStartAt').textContent = lbl;
 }
 
 // 毫秒时间戳 → datetime-local 输入框需要的本地 "YYYY-MM-DDTHH:MM"
@@ -161,9 +165,21 @@ $('#saveRoomBtn').onclick = async () => {
     cover: $('#r_cover').value,
     videoEmbed: $('#r_videoEmbed').value,
     orientation: $('#r_orientation').value,
-    requireAccessCode: $('#r_requireAccessCode').checked
+    requireAccessCode: $('#r_requireAccessCode').checked,
+    liveStartAt: $('#r_liveStartAt_input').value ? new Date($('#r_liveStartAt_input').value).getTime() : null
   });
   toast('配置已保存');
+};
+
+// 预约开播：把状态设为「直播中」并写入开播时间；到点前观众看倒计时，到点自动开播
+$('#scheduleBtn').onclick = async () => {
+  const val = $('#r_liveStartAt_input').value;
+  if (!val) { toast('请先填写开播时间'); return; }
+  const ts = new Date(val).getTime();
+  if (ts <= Date.now() && !confirm('这个时间已经过了，确定要按它当开播基点吗？（观众会从对应进度开始）')) return;
+  await req('PUT', '/api/admin/rooms/' + currentRoomId, { status: 'live', liveStartAt: ts });
+  toast('已预约 ⏰');
+  loadRoom();
 };
 
 $('#goLiveBtn').onclick = async () => {

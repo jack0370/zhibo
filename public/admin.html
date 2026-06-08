@@ -93,9 +93,13 @@
             </select>
           </label>
           <label class="chk"><input id="r_requireAccessCode" type="checkbox"> 需要观看码才能进入（开启后没有有效观看码的人进不来，到「观看码」标签页管理）</label>
+          <label>开播时间（设为未来=预约，到点观众自动开播；留空=未设）
+            <input id="r_liveStartAt_input" class="inp" type="datetime-local">
+          </label>
           <div class="live-row">
             <div class="live-info">当前开播时间：<span id="r_liveStartAt">未开播</span></div>
             <div class="live-btns">
+              <button id="scheduleBtn" class="btn btn-live">📅 预约开播</button>
               <button id="goLiveBtn" class="btn btn-live">🔴 立即开播</button>
             </div>
           </div>

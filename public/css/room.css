@@ -43,6 +43,22 @@ html, body {
 /* 拦截层尺寸由 JS(fitVideoCover) 设为与视频本体完全一致；z-index 高于视频，吃掉点击 */
 .video-guard { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 4; background: transparent; }
 
+/* 开启声音按钮：浮在拦截层之上(z-index 5)，居中胶囊；点击=真实手势→ api.unmute()+play() */
+.sound-btn {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 5; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 11px 20px; border: 0; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62); color: #fff;
+  font-size: 15px; font-weight: 600; white-space: nowrap;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.4); backdrop-filter: blur(4px);
+  animation: soundPulse 1.8s ease-in-out infinite;
+}
+@keyframes soundPulse {
+  0%, 100% { box-shadow: 0 2px 14px rgba(0, 0, 0, 0.4); }
+  50% { box-shadow: 0 2px 22px rgba(255, 255, 255, 0.45); }
+}
+
 /* 顶栏叠加 */
 .topbar {
   position: absolute; top: 0; left: 0; right: 0; z-index: 3;
@@ -163,6 +179,34 @@ html, body {
   background: linear-gradient(135deg, var(--brand), var(--brand-2));
 }
 .enter-btn:active { transform: scale(.97); }
+
+/* 预约开播倒计时遮罩：封面图作背景，暗色叠加保证文字可读 */
+.countdown-mask {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: center;
+  background-color: #000; background-size: cover; background-position: center;
+}
+.countdown-mask::before { /* 暗色蒙层 */
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,.7));
+}
+.countdown-card { position: relative; text-align: center; padding: 24px; max-width: 90%; }
+.countdown-pill {
+  display: inline-block; padding: 4px 14px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; letter-spacing: 1px; color: #fff;
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+}
+.countdown-title {
+  margin-top: 14px; font-size: 20px; font-weight: 800; line-height: 1.25;
+  text-shadow: 0 2px 8px rgba(0,0,0,.6);
+}
+.countdown-sub { margin-top: 6px; font-size: 13px; color: var(--muted); text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+.countdown-timer {
+  margin-top: 18px; font-size: 40px; font-weight: 800; letter-spacing: 2px;
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
+  text-shadow: 0 2px 12px rgba(0,0,0,.7);
+}
+.countdown-hint { margin-top: 12px; font-size: 12px; color: var(--muted); }
 
 /* 底部输入 */
 .composer {

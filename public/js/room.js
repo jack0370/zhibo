@@ -55,12 +55,14 @@ const ME = (() => {
 /* ============================ 状态 ============================ */
 const state = {
   room: null,
+  voomlyApi: null,     // Voomly 官方 playerAPI（onAttached 拿到后存这里）
   clockOffset: 0,      // serverNow - localNow
   presets: [],         // 已按 time 排序
   shownPresetIds: new Set(),
   shownCommentIds: new Set(),
   lastCommentTs: 0,
   entered: false,
+  countdownTimer: null, // 预约开播倒计时
   tickTimer: null,
   pollTimer: null,
   viewerTimer: null,
@@ -201,50 +203,132 @@ function setEmbedHTML(container, html) {
   });
 }
 
-// 把任意形式的 Voomly 输入（script 嵌入 / iframe / 分享链接 / 纯视频ID）统一转成稳定 iframe。
-// 提取不到 Voomly 视频ID 时返回 null，走通用注入（兼容其它平台）。
-function buildVoomlyIframe(input) {
+// 从任意形式的 Voomly 输入（script 嵌入 / iframe / 分享链接 / 纯视频ID）提取视频ID。
+// 提取不到则返回 null（走通用注入，兼容其它平台）。
+function extractVoomlyId(input) {
   if (!input) return null;
   const s = String(input).trim();
   const first = (...res) => { for (const re of res) { const m = s.match(re); if (m) return m[1]; } return ''; };
   let id = first(/data-id="([^"]+)"/i, /[?&]videoId=([^"&\s]+)/i, /\/v\/([A-Za-z0-9]+)/);
   if (!id && /^[A-Za-z0-9]{20,}$/.test(s)) id = s; // 纯视频ID
-  if (!id) return null;
-  const ratio = first(/data-ratio="([^"]+)"/i, /[?&]videoRatio=([^"&\s]+)/i)
-    || (state.videoAspect ? state.videoAspect.toFixed(4) : '0.5625');
-  const type = first(/data-type="([^"]+)"/i, /[?&]type=([^"&\s]+)/i) || 'v';
-  let skin = first(/data-skin-color="([^"]+)"/i, /[?&]skinColor=([^"&\s]+)/i) || '#008EFF';
+  return id || null;
+}
+
+// 从原始嵌入串里取一些可选属性（比例 / 皮肤色），取不到给默认值。
+function voomlyAttr(input, ...res) {
+  const s = String(input || '');
+  for (const re of res) { const m = s.match(re); if (m) return m[1]; }
+  return '';
+}
+
+// 只加载一次官方 embed-build.js（重复注入 .voomly-embed div 不需要重复 load）
+let voomlyLoaderInjected = false;
+
+// 用官方脚本嵌入注入 Voomly，并拿到 playerAPI 来 seek（对齐直播进度）/ unmute（自己接管开声）。
+// 关键：保留官方嵌入而非重建裸 iframe —— 裸 iframe 收不到入站指令，拿不到 API（已实测）。
+function injectVoomlyEmbed(videoId) {
+  const wrap = $('#videoWrap');
+  const guard = $('#videoGuard');   // 先存住：setEmbedHTML 会清空 wrap
+  const soundBtn = $('#soundBtn');
+  const raw = state.room.videoEmbed;
+  const ratio = voomlyAttr(raw, /data-ratio="([^"]+)"/i, /[?&]videoRatio=([^"&\s]+)/i)
+    || (state.videoAspect ? state.videoAspect.toFixed(6) : '0.562500');
+  let skin = voomlyAttr(raw, /data-skin-color="([^"]+)"/i, /[?&]skinColor=([^"&\s]+)/i) || '#008EFF';
   try { skin = decodeURIComponent(skin); } catch (e) { /* 保持原样 */ }
-  let src = 'https://embed.voomly.com/embed/assets/embed.html'
-    + `?videoId=${encodeURIComponent(id)}&videoRatio=${encodeURIComponent(ratio)}`
-    + `&type=${encodeURIComponent(type)}&skinColor=${encodeURIComponent(skin)}&autoplay=1`;
-  // 直播中：用全局直播时钟定位起播点（t=已播秒数），让晚进/重进的人都落在当前进度，像真直播。
-  // 已结束(回放)从头看，未开播不加 t。Voomly 仅支持 t 参数（已验证）。
-  if (state.room && state.room.status === 'live') {
-    const t = elapsedSec();
-    if (t > 0) src += '&t=' + t;
-  }
-  return `<iframe src="${src}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0" title="live"></iframe>`;
+
+  const div = `<div class="voomly-embed" data-id="${escapeHtml(videoId)}" data-ratio="${escapeHtml(ratio)}"`
+    + ` data-type="v" data-skin-color="${escapeHtml(skin)}" style="width:100%;aspect-ratio:${escapeHtml(ratio)}/1;"></div>`;
+  const loader = voomlyLoaderInjected ? '' : '<script src="https://embed.voomly.com/embed/embed-build.js"></script>';
+  voomlyLoaderInjected = true;
+  setEmbedHTML(wrap, div + loader); // setEmbedHTML 会让其中的 <script> 真正执行
+
+  if (guard) wrap.appendChild(guard);       // 重新挂回拦截层（末位，盖在视频上）
+  if (soundBtn) wrap.appendChild(soundBtn);  // 开声按钮在 guard 之后 → z-index 更高 → 可点
+  fitVideoCover();
+  // 脚本型嵌入异步插入 iframe，定时 + 监听 DOM 变化随时重新铺满
+  setTimeout(fitVideoCover, 400);
+  setTimeout(fitVideoCover, 1500);
+  const mo = new MutationObserver(fitVideoCover);
+  mo.observe(wrap, { childList: true, subtree: true });
+  setTimeout(() => mo.disconnect(), 8000);
+
+  bindVoomlyApi(videoId);
+}
+
+// 等官方 preloader 出现 → 拿 playerAPI：onReady 时对齐直播进度，volume 变化时管理开声按钮。
+function bindVoomlyApi(videoId) {
+  let tries = 0;
+  const attach = () => {
+    try {
+      window.voomlyEmbedPlayerPreloader.onAttached(videoId, ({ api }) => {
+        state.voomlyApi = api;
+        api.onReady(() => {
+          try { api.enableAutoplay && api.enableAutoplay(); } catch (e) { /* 兜底，失败无妨 */ }
+          seekToLivePosition();
+        });
+        // 浏览器默认静音自动播放：起播即显示开声按钮，用户解除静音后隐藏
+        api.onVolumeChange((p) => {
+          if (p && p.muted === false) hideSoundBtn(); else showSoundBtn();
+        });
+      });
+    } catch (e) { /* preloader 接口异常：静默退化，最坏只是不 seek/不自动接管开声 */ }
+  };
+  if (window.voomlyEmbedPlayerPreloader) { attach(); return; }
+  const iv = setInterval(() => {
+    if (window.voomlyEmbedPlayerPreloader) { clearInterval(iv); attach(); }
+    else if (++tries > 100) clearInterval(iv); // 封顶 ~10s
+  }, 100);
+}
+
+// 迟到/重进者对齐到「已开播多久」；ended(回放) 从头看，不 seek。
+function seekToLivePosition() {
+  if (!state.voomlyApi || state.room.status !== 'live') return;
+  const t = elapsedSec();
+  if (t > 2) { try { state.voomlyApi.seek({ time: t }); } catch (e) { /* seek 失败无妨 */ } }
 }
 
 function injectVideo() {
   const wrap = $('#videoWrap');
-  const guard = $('#videoGuard'); // 先存住拦截层：setEmbedHTML 会清空 wrap 把它一起删掉
-  if (state.room.videoEmbed && state.room.videoEmbed.trim()) {
-    const code = buildVoomlyIframe(state.room.videoEmbed) || state.room.videoEmbed;
-    setEmbedHTML(wrap, code); // Voomly 统一转 iframe；其它平台原样注入
-    if (guard) wrap.appendChild(guard); // 重新挂回拦截层，作为 wrap 末位子节点盖在视频上
-    fitVideoCover();
-    // 脚本型嵌入会异步插入 iframe，定时 + 监听 DOM 变化随时重新铺满
-    setTimeout(fitVideoCover, 400);
-    setTimeout(fitVideoCover, 1500);
-    const mo = new MutationObserver(fitVideoCover);
-    mo.observe(wrap, { childList: true, subtree: true });
-    setTimeout(() => mo.disconnect(), 8000);
-  } else {
-    wrap.innerHTML = '<div class="video-placeholder">主播正在准备中…</div>';
-  }
+  const embed = state.room.videoEmbed && state.room.videoEmbed.trim();
+  if (!embed) { wrap.innerHTML = '<div class="video-placeholder">主播正在准备中…</div>'; return; }
+
+  const vid = extractVoomlyId(embed);
+  if (vid) { injectVoomlyEmbed(vid); return; } // Voomly：官方脚本嵌入 + playerAPI
+
+  // 其它平台：原样注入兜底（同样重新挂回 guard + 开声按钮，并铺满）
+  const guard = $('#videoGuard');
+  const soundBtn = $('#soundBtn');
+  setEmbedHTML(wrap, state.room.videoEmbed);
+  if (guard) wrap.appendChild(guard);
+  if (soundBtn) wrap.appendChild(soundBtn);
+  fitVideoCover();
+  setTimeout(fitVideoCover, 400);
+  setTimeout(fitVideoCover, 1500);
+  const mo = new MutationObserver(fitVideoCover);
+  mo.observe(wrap, { childList: true, subtree: true });
+  setTimeout(() => mo.disconnect(), 8000);
 }
+
+/* ============================ 开启声音按钮 ============================ */
+// 浏览器只允许静音自动播放，原生开声按钮被拦截层盖住，故我们自己接管：点按钮(真实手势)→ unmute + play。
+function showSoundBtn() {
+  if (state.room.status === 'ended') return; // 回放不需要
+  const btn = $('#soundBtn');
+  if (btn) { btn.hidden = false; fitVideoCover(); }
+}
+function hideSoundBtn() {
+  const btn = $('#soundBtn');
+  if (btn) btn.hidden = true;
+}
+(function bindSoundBtn() {
+  const btn = $('#soundBtn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const api = state.voomlyApi;
+    if (api) { try { api.unmute(); } catch (e) {} try { api.play(); } catch (e) {} }
+    hideSoundBtn();
+  });
+})();
 
 // 让视频按真实比例「覆盖式」铺满舞台：居中，超出裁掉，左右/上下都不留黑边
 function fitVideoCover() {
@@ -292,36 +376,13 @@ function startLiveFeed() {
   ensurePolling();
   if (!state.tickTimer) state.tickTimer = setInterval(revealDuePresets, 1000);
   $('#feedHint').textContent = state.room.status === 'ended' ? '直播已结束 · 回放中' : '直播进行中';
-  // 直播中：盖上透明拦截层，点画面不会暂停（像真直播）。回放(ended)不锁，方便拖进度。
+  // 直播中：进场即盖上透明拦截层，任何平台都点不动、无法暂停（像真直播）。回放(ended)不锁，方便拖进度。
+  // 开声音不再依赖拦截层让路 —— 由我们自己的 #soundBtn(在 guard 之上) 调 api.unmute() 接管。
   if (state.room.status !== 'ended') {
-    armAntiPauseGuard();
+    const guard = $('#videoGuard');
+    if (guard) { guard.hidden = false; fitVideoCover(); }
+    showSoundBtn(); // 起播默认静音，给出开声按钮
   }
-}
-
-// 只有「用户开启了声音」之后，才盖上防暂停拦截层。
-// 为什么以「开声音」为信号：手机浏览器只允许静音自动播放（铁规矩），Voomly 静音起播并显示自带的
-// 「开启声音」按钮，必须用户手点才有声。拦截层会盖死整个视频（含那个开声音按钮、以及 autoplay 被
-// 拦时的封面播放键），所以必须等用户完成「点开声音」这一步、确实有声了，再盖——既不挡开声音/起播，
-// 又保留防暂停。信号用 Voomly 的 voomly:video:volumeChanged 事件里 muted:false（手机端只有用户
-// 手动解除静音才会出现）。检测不到就永不盖，最坏只退化为「能暂停 / 静音可控」，绝不卡死、绝不哑播。
-function armAntiPauseGuard() {
-  let armed = false;
-  function onMsg(e) {
-    // 只认 voomly.com 及其子域，按域名边界匹配（防 evilvoomly.com 之类擦边）
-    let host = '';
-    try { host = new URL(e.origin).host; } catch (_) { return; }
-    if (host !== 'voomly.com' && !host.endsWith('.voomly.com')) return;
-    const d = e.data;
-    if (!d || d.eventName !== 'voomly:video:volumeChanged') return;
-    // muted 明确为 false = 用户开了声音，这时才上锁
-    if (!armed && d.payload && d.payload.muted === false) {
-      armed = true;
-      window.removeEventListener('message', onMsg); // 盖一次就够，撤掉监听
-      const guard = $('#videoGuard');
-      if (guard) { guard.hidden = false; fitVideoCover(); }
-    }
-  }
-  window.addEventListener('message', onMsg);
 }
 
 // 绑定「进入直播间」按钮
@@ -399,17 +460,66 @@ function showGate() {
 /* ============================ 进入直播间流程 ============================ */
 function proceed() {
   const room = state.room;
-  if (room.status === 'pre' || !room.liveStartAt) {
+  if (room.status === 'ended') {
+    injectVideo();
+    startLiveFeed(); // 直接回放历史
+  } else if (room.status === 'live' && room.liveStartAt) {
+    if (now() < room.liveStartAt) {
+      showCountdown(); // 预约：到点前倒计时，到点自动开播
+    } else {
+      showEnterMask(); // 已开播：点「进入直播间」(用户手势) 再注入，浏览器才允许自动播放
+    }
+  } else { // pre / 未设开播时间：未开播聊天室，先聊几句
     injectVideo();
     $('#feedHint').textContent = '直播即将开始，先聊几句吧';
     ensurePolling(); // 未开播也允许评论；预设不展示
     state.entered = true;
-  } else if (room.status === 'ended') {
-    injectVideo();
-    startLiveFeed(); // 直接回放历史
-  } else { // live：视频留到点「进入直播间」(用户手势) 时再注入，浏览器才允许自动播放
-    showEnterMask();
   }
+}
+
+/* ============================ 预约开播倒计时 ============================ */
+// ms → "HH:MM:SS"
+function fmtCountdown(ms) {
+  let s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(h)}:${p(m)}:${p(s)}`;
+}
+
+// 到点前显示封面+倒计时，到点(用统一时间基点 liveStartAt 判断)自动开播
+function showCountdown() {
+  const room = state.room;
+  const mask = $('#countdownMask');
+  if (room.cover && room.cover.trim()) {
+    mask.style.backgroundImage = `url("${room.cover.replace(/"/g, '')}")`;
+  }
+  $('#countdownTitle').textContent = (room.bannerTitle && room.bannerTitle.trim()) || room.name || '直播即将开始';
+  $('#countdownSub').textContent = room.courseTitle || '';
+  $('#statusBadge').textContent = '即将开始';
+  mask.hidden = false;
+
+  const tick = () => {
+    const ms = room.liveStartAt - now();
+    if (ms <= 0) {
+      clearInterval(state.countdownTimer);
+      state.countdownTimer = null;
+      mask.hidden = true;
+      startScheduledLive(); // 到点自动开播
+      return;
+    }
+    $('#countdownTimer').textContent = fmtCountdown(ms);
+  };
+  tick();
+  state.countdownTimer = setInterval(tick, 1000);
+}
+
+// 到点自动开播：静音自动播放（移动端无需手势即可静音起播），随后由 #soundBtn 接管开声。
+// 此刻 elapsedSec()≈0，seekToLivePosition 不 seek，所有人从 0 同步开始。
+function startScheduledLive() {
+  $('#statusBadge').textContent = '直播中';
+  injectVideo();
+  startLiveFeed();
 }
 
 // 链接无效 / 直播间不存在 → 用进入遮罩显示提示，不放行
