@@ -124,12 +124,15 @@
             <button id="addPresetBtn" class="btn btn-primary sm">+ 新增</button>
             <button id="exportBtn" class="btn btn-ghost sm">导出 JSON</button>
             <button id="importBtn" class="btn btn-ghost sm">导入 JSON</button>
+            <button id="batchDelBtn" class="btn btn-danger sm">批量删除</button>
+            <button id="clearPresetsBtn" class="btn btn-danger sm">清空全部</button>
           </div>
         </div>
-        <p class="tip">「出现时间」= 开播后第几秒弹出。类型：comment 评论 / join 进入直播间 / like 点赞。</p>
+        <p class="tip">「出现时间」= 开播后第几秒弹出。类型：comment 评论 / join 进入直播间 / like 点赞。勾选左侧复选框后点「批量删除」。</p>
         <div class="table-wrap">
           <table class="tbl">
             <thead><tr>
+              <th class="col-check"><input type="checkbox" id="presetCheckAll" title="全选"></th>
               <th>时间(秒)</th><th>昵称</th><th>地区</th><th>内容</th><th>类型</th><th>启用</th><th>操作</th>
             </tr></thead>
             <tbody id="presetRows"></tbody>

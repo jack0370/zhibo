@@ -359,6 +359,19 @@ app.delete('/api/admin/presets/:id', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// 批量删除：按 id 数组删除（双重校验 roomId，防误删其它房间）
+app.post('/api/admin/presets/batch-delete', requireAdmin, (req, res) => {
+  const roomId = sanitizeText(req.body.roomId, 20);
+  const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
+  if (!ids.length) return res.status(400).json({ error: '未选择要删除的预设' });
+  const idSet = new Set(ids.map(String));
+  const d = db();
+  const before = d.presets.length;
+  d.presets = d.presets.filter((p) => !(p.roomId === roomId && idSet.has(p.id)));
+  save();
+  res.json({ ok: true, removed: before - d.presets.length });
+});
+
 // 导出预设（JSON，按房间）
 app.get('/api/admin/presets/export', requireAdmin, (req, res) => {
   const roomId = String(req.query.room || '');

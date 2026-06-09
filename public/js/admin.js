@@ -217,10 +217,12 @@ async function loadPresets() {
   const list = await req('GET', '/api/admin/presets?room=' + currentRoomId);
   const tbody = $('#presetRows');
   tbody.innerHTML = '';
-  if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:#8990a6">暂无预设，点「新增」或「导入」</td></tr>'; return; }
+  if ($('#presetCheckAll')) $('#presetCheckAll').checked = false; // 重新加载后清空全选
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="8" style="color:#8990a6">暂无预设，点「新增」或「导入」</td></tr>'; return; }
   for (const p of list) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
+      <td class="col-check"><input type="checkbox" class="pchk" data-id="${p.id}"></td>
       <td>${p.time}</td>
       <td>${esc(p.nickname)}</td>
       <td>${esc(p.region)}</td>
@@ -243,6 +245,23 @@ async function loadPresets() {
     await req('PUT', '/api/admin/presets/' + p.id, { enabled: !p.enabled }); loadPresets();
   });
 }
+
+// 全选 / 批量删除 / 清空全部（按钮与表头复选框在静态 DOM 里，启动时绑定一次即可）
+$('#presetCheckAll').onclick = (e) => {
+  document.querySelectorAll('#presetRows .pchk').forEach((c) => { c.checked = e.target.checked; });
+};
+$('#batchDelBtn').onclick = async () => {
+  const ids = Array.from(document.querySelectorAll('#presetRows .pchk:checked')).map((c) => c.dataset.id);
+  if (!ids.length) { toast('请先勾选要删除的预设'); return; }
+  if (!confirm(`确定删除选中的 ${ids.length} 条预设？不可恢复。`)) return;
+  const res = await req('POST', '/api/admin/presets/batch-delete', { roomId: currentRoomId, ids });
+  toast(`已删除 ${res.removed} 条`); loadPresets();
+};
+$('#clearPresetsBtn').onclick = async () => {
+  if (!confirm('确定清空本房间的全部预设？不可恢复。')) return;
+  const res = await req('POST', '/api/admin/presets/import', { roomId: currentRoomId, items: [], mode: 'replace' });
+  toast('已清空'); loadPresets();
+};
 
 function openPresetModal(p) {
   editingPresetId = p ? p.id : null;

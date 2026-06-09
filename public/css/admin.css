@@ -115,6 +115,8 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color:
 .mini.danger { background: #ffe9ee; color: var(--live); }
 .mini.ok { background: #e6f7ee; color: var(--ok); }
 .switch { cursor: pointer; }
+/* 预设批量删除：复选框列 */
+.col-check { width: 34px; text-align: center; }
 
 /* 弹层 */
 .modal-mask { position: fixed; inset: 0; z-index: 50; background: rgba(20, 24, 40, 0.5); display: flex; align-items: center; justify-content: center; padding: 20px; }
