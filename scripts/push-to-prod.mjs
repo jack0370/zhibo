@@ -1,14 +1,19 @@
 // 把本地 data/db.json 里的直播间(含预设、观看码)上传到线上。
-// 用法： node scripts/push-to-prod.mjs <后台密码>
-// 说明：只迁移 房间配置 + 预设 + 观看码，不迁移测试评论；状态统一设为「未开播」，
-//      上线后你在后台点「立即开播」即可。线上原有的 demo01 演示间不动，可自行删除。
+// 用法： node scripts/push-to-prod.mjs <后台密码> [只同步的房间id]
+//   - 不带房间id：同步本地全部房间
+//   - 带房间id（如 3ms7ae）：只同步该房间，避免重复上传已在线上的老房间
+// 说明：迁移 房间配置(含视频类型/Voomly嵌入/HLS地址) + 预设 + 观看码，不迁移测试评论；
+//      状态统一设为「未开播」，上线后在后台点「立即开播」即可。脚本是「新建」房间，不覆盖线上已有。
 import fs from 'fs';
 
 const BASE = process.env.PROD_URL || 'https://zhibo-live.onrender.com';
 const PASS = process.argv[2] || process.env.ADMIN_PASSWORD;
-if (!PASS) { console.error('用法: node scripts/push-to-prod.mjs <后台密码>'); process.exit(1); }
+const ONLY = process.argv[3] || process.env.ONLY_ROOM; // 可选：只同步这个房间id
+if (!PASS) { console.error('用法: node scripts/push-to-prod.mjs <后台密码> [只同步的房间id]'); process.exit(1); }
 
 const db = JSON.parse(fs.readFileSync(new URL('../data/db.json', import.meta.url), 'utf8'));
+const rooms = ONLY ? db.rooms.filter((r) => r.id === ONLY) : db.rooms;
+if (ONLY && !rooms.length) { console.error('本地找不到房间:', ONLY); process.exit(1); }
 
 let cookie = '';
 async function api(method, path, body) {
@@ -25,14 +30,16 @@ async function api(method, path, body) {
 await api('POST', '/api/admin/login', { password: PASS });
 console.log('✓ 登录线上后台成功');
 
-for (const room of db.rooms) {
-  const created = await api('POST', '/api/admin/rooms', { name: room.name });
+for (const room of rooms) {
+  const created = await api('POST', '/api/admin/rooms', { name: room.name, videoType: room.videoType });
   const id = created.id;
   await api('PUT', '/api/admin/rooms/' + id, {
     name: room.name, courseTitle: room.courseTitle,
     bannerTitle: room.bannerTitle, bannerSubtitle: room.bannerSubtitle,
     status: 'pre', viewerBase: room.viewerBase,
-    videoEmbed: room.videoEmbed, orientation: room.orientation,
+    videoType: room.videoType || 'voomly',
+    videoEmbed: room.videoEmbed, hlsUrl: room.hlsUrl || '',
+    orientation: room.orientation,
     cover: room.cover, requireAccessCode: room.requireAccessCode
   });
 
