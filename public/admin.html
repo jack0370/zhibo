@@ -83,8 +83,17 @@
             <label>观看人数（基数）<input id="r_viewerBase" class="inp" type="number" min="0"></label>
           </div>
           <label>封面图 URL（可选）<input id="r_cover" class="inp" placeholder="https://..."></label>
-          <label>视频嵌入代码 / 链接（Voomly：贴 iframe、script、分享链接或视频ID 都行）
+          <label>视频类型
+            <select id="r_videoType" class="inp">
+              <option value="voomly">老版（Voomly 嵌入）</option>
+              <option value="hls">新版（Cloudflare HLS 自建播放器）</option>
+            </select>
+          </label>
+          <label id="voomlyField">视频嵌入代码 / 链接（Voomly：贴 iframe、script、分享链接或视频ID 都行）
             <textarea id="r_videoEmbed" class="inp ta" rows="6" placeholder="把 Voomly 后台的嵌入代码整段粘贴进来即可（iframe / script / 分享链接 / 视频ID 都支持）"></textarea>
+          </label>
+          <label id="hlsField" hidden>Cloudflare HLS 地址（Cloudflare Stream 的 HLS Manifest URL，.m3u8）
+            <input id="r_hlsUrl" class="inp" placeholder="https://customer-xxx.cloudflarestream.com/<视频ID>/manifest/video.m3u8">
           </label>
           <label>视频方向
             <select id="r_orientation" class="inp">
@@ -239,6 +248,25 @@
       <div class="modal-actions">
         <button id="importCancel" class="btn btn-ghost">取消</button>
         <button id="importDo" class="btn btn-primary">导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 创建直播间弹层 -->
+  <div class="modal-mask" id="createModal" hidden>
+    <div class="modal">
+      <h3>创建直播间</h3>
+      <label>直播间名称<input id="cr_name" class="inp" placeholder="新直播间"></label>
+      <label>视频类型
+        <select id="cr_videoType" class="inp">
+          <option value="voomly">老版（Voomly 嵌入）</option>
+          <option value="hls">新版（Cloudflare HLS 自建播放器）</option>
+        </select>
+      </label>
+      <p class="tip">创建后可在「直播间配置」里随时修改视频类型与地址。</p>
+      <div class="modal-actions">
+        <button id="createCancel" class="btn btn-ghost">取消</button>
+        <button id="createDo" class="btn btn-primary">创建</button>
       </div>
     </div>
   </div>

@@ -55,7 +55,11 @@ const ME = (() => {
 /* ============================ 状态 ============================ */
 const state = {
   room: null,
+  player: null,        // 统一播放器接口 { seek(tSec), unmute(), play() }，由具体注入器赋值
   voomlyApi: null,     // Voomly 官方 playerAPI（onAttached 拿到后存这里）
+  hlsVideo: null,      // 新版 HLS 的 <video> 元素
+  hls: null,           // hls.js 实例
+  hlsStarted: false,   // HLS 是否已结束预缓冲、正式起播
   clockOffset: 0,      // serverNow - localNow
   presets: [],         // 已按 time 排序
   shownPresetIds: new Set(),
@@ -304,6 +308,12 @@ function bindVoomlyApi(videoId) {
     try {
       window.voomlyEmbedPlayerPreloader.onAttached(videoId, ({ api }) => {
         state.voomlyApi = api;
+        // 统一播放器接口（Voomly 实现）
+        state.player = {
+          seek: (t) => { try { api.seek({ time: t }); } catch (e) { /* 无妨 */ } },
+          unmute: () => { try { api.unmute(); } catch (e) {} try { api.play(); } catch (e) {} },
+          play: () => { try { api.play(); } catch (e) {} }
+        };
         api.onReady(() => {
           try { api.enableAutoplay && api.enableAutoplay(); } catch (e) { /* 兜底，失败无妨 */ }
           seekToLivePosition();
@@ -322,15 +332,143 @@ function bindVoomlyApi(videoId) {
   }, 100);
 }
 
-// 迟到/重进者对齐到「已开播多久」；ended(回放) 从头看，不 seek。
+// 迟到/重进者对齐到「已开播多久」；ended(回放) 从头看，不 seek。播放器无关：走统一 player.seek。
 function seekToLivePosition() {
-  if (!state.voomlyApi || state.room.status !== 'live') return;
+  if (!state.player || state.room.status !== 'live') return;
   const t = elapsedSec();
-  if (t > 2) { try { state.voomlyApi.seek({ time: t }); } catch (e) { /* seek 失败无妨 */ } }
+  if (t > 2) state.player.seek(t);
 }
+
+/* ============================ 新版：Cloudflare HLS 自建播放器 ============================ */
+// 懒加载 hls.js（仅新版房间用），加载一次
+let hlsLoading = null;
+function loadHlsJs(cb) {
+  if (window.Hls) { cb(); return; }
+  if (hlsLoading) { hlsLoading.push(cb); return; }
+  hlsLoading = [cb];
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1';
+  s.onload = () => { const q = hlsLoading; hlsLoading = []; q.forEach((f) => f()); };
+  s.onerror = () => { hlsLoading = null; };
+  document.head.appendChild(s);
+}
+
+// 当前播放点前方已缓冲的秒数（缓冲垫厚度）
+function bufferedAhead(v, from) {
+  const b = v.buffered;
+  for (let i = 0; i < b.length; i++) {
+    if (b.start(i) - 0.25 <= from && from <= b.end(i)) return b.end(i) - from;
+  }
+  return 0;
+}
+
+const SYNC_CUSHION = 6;     // 起播前要攒够的缓冲垫（秒）
+const SYNC_MAX_WAIT = 8000; // 弱网兜底：最多等这么久就尽力起播（毫秒）
+
+// 起播流程：先在覆盖层后预缓冲，攒够缓冲垫再「对齐到当前直播进度」并露出画面。
+// 解决「开头 5 秒卡顿」——把那段必卡的窗口藏在「正在同步直播进度…」覆盖层后面。
+function startBufferedPlayback(video) {
+  if (state.hlsStarted) return;
+  const live = state.room.status !== 'ended';
+  // 先把播放点放到直播进度，让 hls 在此位置预缓冲（回放从头，不动）
+  if (live) { try { video.currentTime = elapsedSec(); } catch (e) { /* 无妨 */ } }
+  const startedAt = performance.now();
+
+  const reveal = () => {
+    if (state.hlsStarted) return;
+    state.hlsStarted = true;
+    // 起播对齐：露出画面的这一刻 seek 到「当前」直播进度（消化预缓冲耗时），与评论时间线对齐
+    if (live) { try { video.currentTime = elapsedSec(); } catch (e) { /* 无妨 */ } }
+    video.play().catch(() => {});
+    hideSyncOverlay();
+  };
+
+  const tick = () => {
+    if (state.hlsStarted) return;
+    const probe = live ? elapsedSec() : video.currentTime;
+    const enough = bufferedAhead(video, probe) >= SYNC_CUSHION;
+    if (enough || performance.now() - startedAt > SYNC_MAX_WAIT) { reveal(); return; }
+    setTimeout(tick, 250);
+  };
+  tick();
+}
+
+// 用原生 <video> + hls.js 播放 Cloudflare 的 HLS 地址。直接拿到 video，seek/unmute/防暂停都一行。
+function injectHlsPlayer(url) {
+  const wrap = $('#videoWrap');
+  const guard = $('#videoGuard');
+  const soundBtn = $('#soundBtn');
+  const video = document.createElement('video');
+  video.className = 'hls-fill'; // 用 object-fit:cover 按真实比例铺满（不依赖 orientation 猜测）
+  video.muted = true; video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', ''); video.playsInline = true; video.preload = 'auto';
+  // 不设 autoplay：先在覆盖层后预缓冲，由 startBufferedPlayback 攒够缓冲再起播
+  wrap.innerHTML = '';
+  wrap.appendChild(video);
+  if (guard) wrap.appendChild(guard);       // 拦截层盖在视频上（末位）
+  if (soundBtn) wrap.appendChild(soundBtn);  // 开声按钮在 guard 之后 → 可点
+  state.hlsVideo = video;
+  state.hlsStarted = false;
+
+  const live = state.room.status !== 'ended';
+  if (live) showSyncOverlay(); // 「正在同步直播进度…」盖住开头预缓冲窗口
+  // 兜底：manifest 迟迟不就绪也不能一直转圈，最多 12s 后尽力起播 + 撤层
+  setTimeout(() => { if (!state.hlsStarted) startBufferedPlayback(video); }, 12000);
+
+  const onReady = () => startBufferedPlayback(video);
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = url; // Safari/iOS 原生支持 HLS
+    video.addEventListener('loadedmetadata', onReady, { once: true });
+  } else {
+    loadHlsJs(() => {
+      if (!window.Hls || !window.Hls.isSupported()) { video.src = url; video.addEventListener('loadedmetadata', onReady, { once: true }); return; }
+      const hls = new window.Hls({
+        capLevelToPlayerSize: true, // 不拉超过屏幕分辨率的高码率档
+        startLevel: 0,              // 起播先低码率，填缓冲快、起播稳，之后 ABR 上调
+        maxBufferLength: 30,        // 持续攒前向缓冲垫
+        maxMaxBufferLength: 60
+      });
+      state.hls = hls;
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(window.Hls.Events.MANIFEST_PARSED, onReady);
+    });
+  }
+  // 防暂停兜底：仅「已正式起播后」被暂停才续播，避免和预缓冲/缓冲互掐
+  video.addEventListener('pause', () => {
+    if (state.room.status !== 'ended' && state.hlsStarted) video.play().catch(() => {});
+  });
+  // 静音状态变化 → 已解除静音则收起开声按钮
+  video.addEventListener('volumechange', () => { if (!video.muted) hideSoundBtn(); });
+
+  // 统一播放器接口（HLS 实现）
+  state.player = {
+    seek: (t) => { try { video.currentTime = t; } catch (e) { /* 无妨 */ } },
+    unmute: () => { video.muted = false; video.play().catch(() => {}); },
+    play: () => video.play().catch(() => {})
+  };
+
+  fitVideoCover();
+  setTimeout(fitVideoCover, 300);
+  setTimeout(fitVideoCover, 1200);
+}
+
+// 「正在同步直播进度…」覆盖层
+function showSyncOverlay() { const o = $('#syncMask'); if (o) o.hidden = false; }
+function hideSyncOverlay() { const o = $('#syncMask'); if (o) o.hidden = true; }
 
 function injectVideo() {
   const wrap = $('#videoWrap');
+
+  // 新版：Cloudflare HLS 地址 + 自建播放器
+  if (state.room.videoType === 'hls') {
+    const url = (state.room.hlsUrl || '').trim();
+    if (url) { injectHlsPlayer(url); return; }
+    wrap.innerHTML = '<div class="video-placeholder">未配置视频地址</div>';
+    return;
+  }
+
+  // 老版：Voomly / 通用嵌入
   const embed = state.room.videoEmbed && state.room.videoEmbed.trim();
   if (!embed) { wrap.innerHTML = '<div class="video-placeholder">主播正在准备中…</div>'; return; }
 
@@ -366,8 +504,7 @@ function hideSoundBtn() {
   const btn = $('#soundBtn');
   if (!btn) return;
   btn.addEventListener('click', () => {
-    const api = state.voomlyApi;
-    if (api) { try { api.unmute(); } catch (e) {} try { api.play(); } catch (e) {} }
+    if (state.player) state.player.unmute(); // 真实手势 → 解除静音（Voomly/HLS 统一）
     hideSoundBtn();
   });
 })();
@@ -377,6 +514,12 @@ function fitVideoCover() {
   const stage = $('#stage');
   const el = document.querySelector('#videoWrap iframe, #videoWrap video');
   if (!stage || !el) return;
+  // 新版原生 video：由 CSS object-fit:cover 按真实比例铺满，这里只把拦截层铺满整个舞台即可
+  if (el.classList && el.classList.contains('hls-fill')) {
+    const guard = $('#videoGuard');
+    if (guard) { guard.style.width = stage.clientWidth + 'px'; guard.style.height = stage.clientHeight + 'px'; }
+    return;
+  }
   // 脚本型嵌入常给 iframe 套一层按比例撑高的 wrapper，先把这些 wrapper 撑满舞台、去掉内边距，
   // 这样里面的 iframe 才是相对舞台定位，覆盖式铺满才准确。
   let p = el.parentElement;

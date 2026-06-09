@@ -97,7 +97,9 @@ app.get('/api/room', (req, res) => {
     bannerSubtitle: r.bannerSubtitle || '',
     status: r.status,
     viewerBase: r.viewerBase,
+    videoType: r.videoType || 'voomly',
     videoEmbed: r.videoEmbed,
+    hlsUrl: r.hlsUrl || '',
     orientation: r.orientation || 'landscape',
     cover: r.cover,
     liveStartAt: r.liveStartAt,
@@ -225,7 +227,9 @@ app.get('/api/admin/me', (req, res) => {
 function defaultRoom() {
   return {
     name: '新直播间', courseTitle: '', bannerTitle: '', bannerSubtitle: '',
-    status: 'pre', viewerBase: 100, videoEmbed: '', orientation: 'portrait',
+    status: 'pre', viewerBase: 100,
+    videoType: 'voomly', videoEmbed: '', hlsUrl: '', // voomly=老版嵌入；hls=新版 Cloudflare 自建播放器
+    orientation: 'portrait',
     cover: '', liveStartAt: null, requireAccessCode: false
   };
 }
@@ -237,7 +241,9 @@ function applyRoomFields(r, b) {
   if (b.bannerSubtitle !== undefined) r.bannerSubtitle = String(b.bannerSubtitle).replace(/[<>]/g, '').slice(0, 120);
   if (b.status !== undefined && ['pre', 'live', 'ended'].includes(b.status)) r.status = b.status;
   if (b.viewerBase !== undefined) r.viewerBase = Math.max(0, parseInt(b.viewerBase, 10) || 0);
+  if (b.videoType !== undefined && ['voomly', 'hls'].includes(b.videoType)) r.videoType = b.videoType;
   if (b.videoEmbed !== undefined) r.videoEmbed = String(b.videoEmbed).slice(0, 20000);
+  if (b.hlsUrl !== undefined) r.hlsUrl = sanitizeText(b.hlsUrl, 1000);
   if (b.orientation !== undefined && ['portrait', 'landscape'].includes(b.orientation)) r.orientation = b.orientation;
   if (b.cover !== undefined) r.cover = sanitizeText(b.cover, 500);
   if (b.liveStartAt !== undefined) r.liveStartAt = b.liveStartAt ? Number(b.liveStartAt) : null;
@@ -260,6 +266,7 @@ app.get('/api/admin/rooms', requireAdmin, (req, res) => {
 app.post('/api/admin/rooms', requireAdmin, (req, res) => {
   const room = { id: roomCode(), ...defaultRoom(), createdAt: Date.now() };
   if (req.body && req.body.name) room.name = sanitizeText(req.body.name, 50);
+  if (req.body && ['voomly', 'hls'].includes(req.body.videoType)) room.videoType = req.body.videoType;
   db().rooms.push(room);
   save();
   res.json(room);

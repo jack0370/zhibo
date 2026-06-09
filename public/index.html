@@ -54,6 +54,14 @@
         </div>
       </div>
 
+      <!-- 起播预缓冲：盖住开头那几秒的卡顿窗口 -->
+      <div class="sync-mask" id="syncMask" hidden>
+        <div class="sync-box">
+          <div class="sync-spinner"></div>
+          <div class="sync-text">正在同步直播进度…</div>
+        </div>
+      </div>
+
       <!-- 进入直播间遮罩 -->
       <div class="enter-mask" id="enterMask" hidden>
         <div class="enter-card">

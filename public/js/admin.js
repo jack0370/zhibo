@@ -105,10 +105,18 @@ async function copyLink(id) {
   catch (e) { prompt('复制下面的链接：', link); }
 }
 
-$('#createRoomBtn').onclick = async () => {
-  const name = prompt('给新直播间起个名字：', '新直播间');
-  if (name === null) return;
-  const room = await req('POST', '/api/admin/rooms', { name: name || '新直播间' });
+$('#createRoomBtn').onclick = () => {
+  $('#cr_name').value = '';
+  $('#cr_videoType').value = 'voomly';
+  $('#createModal').hidden = false;
+  setTimeout(() => $('#cr_name').focus(), 50);
+};
+$('#createCancel').onclick = () => { $('#createModal').hidden = true; };
+$('#createDo').onclick = async () => {
+  const name = $('#cr_name').value.trim() || '新直播间';
+  const videoType = $('#cr_videoType').value;
+  const room = await req('POST', '/api/admin/rooms', { name, videoType });
+  $('#createModal').hidden = true;
   toast('已创建'); openManage(room);
 };
 $('#copyLinkBtn').onclick = () => { if (currentRoomId) copyLink(currentRoomId); };
@@ -137,7 +145,10 @@ async function loadRoom() {
   $('#r_status').value = r.status || 'pre';
   $('#r_viewerBase').value = r.viewerBase || 0;
   $('#r_cover').value = r.cover || '';
+  $('#r_videoType').value = r.videoType || 'voomly';
   $('#r_videoEmbed').value = r.videoEmbed || '';
+  $('#r_hlsUrl').value = r.hlsUrl || '';
+  toggleVideoFields();
   $('#r_orientation').value = r.orientation || 'landscape';
   $('#r_requireAccessCode').checked = !!r.requireAccessCode;
   $('#r_liveStartAt_input').value = r.liveStartAt ? toLocalInput(r.liveStartAt) : '';
@@ -146,6 +157,14 @@ async function loadRoom() {
   if (r.liveStartAt) lbl = fmtTime(r.liveStartAt) + (r.liveStartAt > Date.now() ? '（已预约）' : '（已开播）');
   $('#r_liveStartAt').textContent = lbl;
 }
+
+// 按视频类型显隐对应字段（老版 Voomly 嵌入 / 新版 Cloudflare HLS 地址）
+function toggleVideoFields() {
+  const t = $('#r_videoType').value;
+  $('#voomlyField').hidden = t !== 'voomly';
+  $('#hlsField').hidden = t !== 'hls';
+}
+$('#r_videoType').addEventListener('change', toggleVideoFields);
 
 // 毫秒时间戳 → datetime-local 输入框需要的本地 "YYYY-MM-DDTHH:MM"
 function toLocalInput(ts) {
@@ -163,7 +182,9 @@ $('#saveRoomBtn').onclick = async () => {
     status: $('#r_status').value,
     viewerBase: $('#r_viewerBase').value,
     cover: $('#r_cover').value,
+    videoType: $('#r_videoType').value,
     videoEmbed: $('#r_videoEmbed').value,
+    hlsUrl: $('#r_hlsUrl').value,
     orientation: $('#r_orientation').value,
     requireAccessCode: $('#r_requireAccessCode').checked,
     liveStartAt: $('#r_liveStartAt_input').value ? new Date($('#r_liveStartAt_input').value).getTime() : null
