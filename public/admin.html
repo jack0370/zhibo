@@ -25,6 +25,7 @@
         <button class="tab active" data-tab="room">直播间配置</button>
         <button class="tab" data-tab="presets">预设互动</button>
         <button class="tab" data-tab="comments">用户评论</button>
+        <button class="tab" data-tab="viewers">观看记录</button>
         <button class="tab" data-tab="codes">观看码</button>
       </nav>
       <div class="appbar-right">
@@ -152,6 +153,26 @@
               <th>时间</th><th>昵称</th><th>地区</th><th>内容</th><th>状态</th><th>操作</th>
             </tr></thead>
             <tbody id="commentRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 观看记录 -->
+      <section class="panel" data-panel="viewers" hidden>
+        <div class="panel-head">
+          <h2>观看记录 <span id="onlineBadge" class="online-badge">在线 0</span></h2>
+          <div class="actions">
+            <button id="refreshViewersBtn" class="btn btn-ghost sm">刷新</button>
+            <button id="clearViewersBtn" class="btn btn-danger sm">清空记录</button>
+          </div>
+        </div>
+        <p class="tip">真实用户进入直播间即记录。「在线中」= 用户当前还在；退出时间在关闭页面或心跳停止 ~45 秒后判定。每进入一次算一条，本页每 10 秒自动刷新。</p>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>状态</th><th>昵称</th><th>地区</th><th>进入时间</th><th>退出时间</th><th>观看时长</th>
+            </tr></thead>
+            <tbody id="viewerRows"></tbody>
           </table>
         </div>
       </section>

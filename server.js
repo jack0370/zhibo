@@ -83,6 +83,19 @@ function roomCode() {
   return c;
 }
 
+/* ----------------------------- 观看会话（在线/进退场追踪） ----------------------------- */
+// 心跳式：前台每 ~15s 上报一次心跳，关闭页面用 sendBeacon 补发「离开」。
+// 退出时间 = 显式离开信号；若没有，则心跳停止超过 ONLINE_GRACE_MS 后取「最后在线时间」。
+const ONLINE_GRACE_MS = 45000; // 超过这么久没收到心跳 → 视为已离开
+
+// 心跳量大，不每次写盘：只更新内存并打脏标记，定时批量落盘（新会话/离开仍立即落盘）
+let sessionsDirty = false;
+setInterval(() => { if (sessionsDirty) { sessionsDirty = false; save(); } }, 20000);
+
+function findSession(id) {
+  return (db().viewerSessions || (db().viewerSessions = [])).find((s) => s.id === id);
+}
+
 /* ----------------------------- 前台 API（均按 roomId 隔离） ----------------------------- */
 
 // 房间配置（不下发密码等敏感字段）+ 服务器当前时间
@@ -185,6 +198,44 @@ app.post('/api/access', (req, res) => {
   c.useCount = (c.useCount || 0) + 1;
   save();
   res.json({ ok: true, code: c.code, nickname: c.nickname, region: c.region });
+});
+
+/* ----------------------------- 在线心跳 / 离开（前台上报，后台「观看记录」用） ----------------------------- */
+
+// 心跳：首次上报 = 进入直播间（记进入时间）；之后每次刷新「最后在线时间」。
+app.post('/api/heartbeat', (req, res) => {
+  const roomId = sanitizeText(req.body.roomId, 20);
+  const sessionId = sanitizeText(req.body.sessionId, 40);
+  if (!sessionId || !getRoom(roomId)) return res.status(204).end();
+  const now = Date.now();
+  let s = findSession(sessionId);
+  if (!s || s.roomId !== roomId) {
+    s = {
+      id: sessionId, roomId,
+      clientId: sanitizeText(req.body.clientId, 40),
+      nickname: sanitizeText(req.body.nickname, 20),
+      region: sanitizeText(req.body.region, 20),
+      enteredAt: now, lastSeenAt: now, leftAt: null,
+      ip: clientIp(req)
+    };
+    db().viewerSessions.push(s);
+    save(); // 新会话立即落盘，避免重启丢「进入时间」
+  } else {
+    s.lastSeenAt = now;
+    s.leftAt = null; // 又收到心跳 = 还在 → 撤销之前的离开标记
+    if (req.body.nickname) s.nickname = sanitizeText(req.body.nickname, 20);
+    if (req.body.region) s.region = sanitizeText(req.body.region, 20);
+    sessionsDirty = true;
+  }
+  res.json({ ok: true });
+});
+
+// 离开：sendBeacon 在关闭/切走页面时补发，拿到精确退出时间
+app.post('/api/leave', (req, res) => {
+  const sessionId = sanitizeText(req.body && req.body.sessionId, 40);
+  const s = sessionId ? findSession(sessionId) : null;
+  if (s) { s.leftAt = Date.now(); s.lastSeenAt = s.leftAt; save(); }
+  res.status(204).end();
 });
 
 /* ----------------------------- 后台鉴权 ----------------------------- */
@@ -298,6 +349,7 @@ app.delete('/api/admin/rooms/:id', requireAdmin, (req, res) => {
   d.presets = d.presets.filter((p) => p.roomId !== id);
   d.comments = d.comments.filter((c) => c.roomId !== id);
   d.accessCodes = d.accessCodes.filter((c) => c.roomId !== id);
+  d.viewerSessions = (d.viewerSessions || []).filter((s) => s.roomId !== id);
   save();
   res.json({ ok: true });
 });
@@ -447,6 +499,36 @@ app.post('/api/admin/comments/:id/to-preset', requireAdmin, (req, res) => {
   db().presets.push(preset);
   save();
   res.json(preset);
+});
+
+/* ----------------------------- 后台：观看记录（在线 / 进退场） ----------------------------- */
+
+app.get('/api/admin/sessions', requireAdmin, (req, res) => {
+  const roomId = String(req.query.room || '');
+  const now = Date.now();
+  const list = (db().viewerSessions || [])
+    .filter((s) => s.roomId === roomId)
+    .sort((a, b) => b.enteredAt - a.enteredAt)
+    .map((s) => {
+      const online = !s.leftAt && (now - s.lastSeenAt) < ONLINE_GRACE_MS;
+      const exitAt = online ? null : (s.leftAt || s.lastSeenAt);
+      return {
+        id: s.id, clientId: s.clientId, nickname: s.nickname, region: s.region,
+        enteredAt: s.enteredAt, exitAt, online,
+        durationSec: Math.max(0, Math.floor(((exitAt || now) - s.enteredAt) / 1000))
+      };
+    });
+  res.json({ sessions: list, onlineCount: list.filter((s) => s.online).length, serverNow: now });
+});
+
+// 清空本房间观看记录
+app.post('/api/admin/sessions/clear', requireAdmin, (req, res) => {
+  const roomId = sanitizeText(req.body.roomId, 20);
+  const d = db();
+  const before = (d.viewerSessions || []).length;
+  d.viewerSessions = (d.viewerSessions || []).filter((s) => s.roomId !== roomId);
+  save();
+  res.json({ ok: true, removed: before - d.viewerSessions.length });
 });
 
 /* ----------------------------- 后台：观看码 ----------------------------- */

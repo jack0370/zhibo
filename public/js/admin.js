@@ -32,6 +32,7 @@ function showApp() { $('#loginMask').hidden = true; $('#app').hidden = false; sh
 
 // 一级：直播间列表
 function showRoomsList() {
+  stopViewersAutoRefresh();
   currentRoomId = null;
   $('#roomsView').hidden = false;
   $('#manageView').hidden = true;
@@ -42,6 +43,7 @@ function showRoomsList() {
 
 // 二级：进入某直播间管理
 function openManage(room) {
+  stopViewersAutoRefresh();
   currentRoomId = room.id;
   $('#roomsView').hidden = true;
   $('#manageView').hidden = false;
@@ -127,10 +129,12 @@ $$('.tab').forEach((tab) => {
     $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
     const name = tab.dataset.tab;
     $$('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
+    stopViewersAutoRefresh(); // 切到别的 tab 先停掉观看记录的自动刷新
     if (name === 'presets') loadPresets();
     if (name === 'comments') loadComments();
     if (name === 'room') loadRoom();
     if (name === 'codes') loadCodes();
+    if (name === 'viewers') { loadViewers(); startViewersAutoRefresh(); }
   };
 });
 
@@ -338,6 +342,61 @@ async function loadComments() {
     toast('已加入预设互动库');
   });
 }
+
+/* ============================ 观看记录 ============================ */
+let viewersTimer = null;
+
+// 秒 → "Xs / Xm Ys / Xh Ym" 紧凑时长
+function fmtDuration(sec) {
+  sec = Math.max(0, sec | 0);
+  const h = Math.floor(sec / 3600); sec -= h * 3600;
+  const m = Math.floor(sec / 60); const s = sec - m * 60;
+  const p = (n) => String(n).padStart(2, '0');
+  if (h) return `${h}:${p(m)}:${p(s)}`;
+  if (m) return `${m}分${p(s)}秒`;
+  return `${s}秒`;
+}
+
+async function loadViewers() {
+  const data = await req('GET', '/api/admin/sessions?room=' + currentRoomId);
+  $('#onlineBadge').textContent = '在线 ' + data.onlineCount;
+  const tbody = $('#viewerRows');
+  tbody.innerHTML = '';
+  if (!data.sessions.length) { tbody.innerHTML = '<tr><td colspan="6" style="color:#8990a6">暂无观看记录</td></tr>'; return; }
+  for (const s of data.sessions) {
+    const tr = document.createElement('tr');
+    const st = s.online
+      ? '<span class="tag visible">● 在线中</span>'
+      : '<span class="tag hidden">已离开</span>';
+    const nick = s.nickname ? esc(s.nickname) : '<span style="color:#8990a6">(未填昵称)</span>';
+    tr.innerHTML = `
+      <td>${st}</td>
+      <td>${nick}</td>
+      <td>${esc(s.region)}</td>
+      <td style="white-space:nowrap">${fmtTime(s.enteredAt)}</td>
+      <td style="white-space:nowrap">${s.online ? '—' : fmtTime(s.exitAt)}</td>
+      <td style="white-space:nowrap">${fmtDuration(s.durationSec)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+// 自动刷新：仅当「观看记录」面板可见时跑，离开即自动停
+function startViewersAutoRefresh() {
+  stopViewersAutoRefresh();
+  viewersTimer = setInterval(() => {
+    const panel = document.querySelector('[data-panel="viewers"]');
+    if (panel && !panel.hidden && currentRoomId) loadViewers().catch(() => {});
+    else stopViewersAutoRefresh();
+  }, 10000);
+}
+function stopViewersAutoRefresh() { if (viewersTimer) { clearInterval(viewersTimer); viewersTimer = null; } }
+
+$('#refreshViewersBtn').onclick = () => loadViewers();
+$('#clearViewersBtn').onclick = async () => {
+  if (!confirm('确定清空本房间的全部观看记录？不可恢复。')) return;
+  const res = await req('POST', '/api/admin/sessions/clear', { roomId: currentRoomId });
+  toast(`已清空 ${res.removed} 条`); loadViewers();
+};
 
 /* ============================ 观看码 ============================ */
 let editingCodeId = null;

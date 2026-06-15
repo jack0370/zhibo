@@ -72,6 +72,7 @@ const state = {
   countdownTimer: null, // 预约开播倒计时
   tickTimer: null,
   pollTimer: null,
+  presenceTimer: null,
   viewerTimer: null,
   displayViewers: 0
 };
@@ -547,6 +548,46 @@ function fitVideoCover() {
 }
 window.addEventListener('resize', fitVideoCover);
 
+/* ============================ 在线心跳（后台「观看记录」用） ============================ */
+// sessionId 存 sessionStorage：刷新页面不算新会话，关掉标签页才算下一次访问。
+const SESSION_ID = (() => {
+  let id = sessionStorage.getItem('zhibo_sid');
+  if (!id) { id = 's_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); sessionStorage.setItem('zhibo_sid', id); }
+  return id;
+})();
+
+function heartbeat() {
+  const body = JSON.stringify({
+    roomId: ROOM_ID, sessionId: SESSION_ID, clientId: ME.clientId,
+    nickname: ME.nickname, region: ME.region
+  });
+  fetch('/api/heartbeat', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body, keepalive: true
+  }).catch(() => { /* 心跳失败忽略，下一拍再来 */ });
+}
+
+// 离开：关闭/切走页面时补一条，拿到精确退出时间（sendBeacon 在 unload 阶段最可靠）
+function sendLeave() {
+  const payload = JSON.stringify({ roomId: ROOM_ID, sessionId: SESSION_ID });
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon('/api/leave', new Blob([payload], { type: 'application/json' }));
+  } else {
+    fetch('/api/leave', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(() => {});
+  }
+}
+
+// 进入直播间后开始心跳（幂等）：立即发一拍，之后每 15s 一拍
+function startPresence() {
+  if (state.presenceTimer) return;
+  heartbeat();
+  state.presenceTimer = setInterval(heartbeat, 15000);
+  window.addEventListener('pagehide', sendLeave);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') heartbeat(); // 切回前台立即刷新在线状态
+  });
+}
+
 /* ============================ 启动互动 ============================ */
 // 评论轮询（幂等：已在轮询就不重复开）
 function ensurePolling() {
@@ -557,6 +598,7 @@ function ensurePolling() {
 
 function startLiveFeed() {
   state.entered = true;
+  startPresence();
   backfillHistory();
   ensurePolling();
   if (!state.tickTimer) state.tickTimer = setInterval(() => { revealDuePresets(); revealDueComments(); }, 1000);
@@ -658,6 +700,7 @@ function proceed() {
     injectVideo();
     $('#feedHint').textContent = '直播即将开始，先聊几句吧';
     ensurePolling(); // 未开播也允许评论；预设不展示
+    startPresence();
     state.entered = true;
   }
 }
