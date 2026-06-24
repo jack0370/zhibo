@@ -67,6 +67,35 @@ git push -u origin main
 4. ✅ 确认数据持久：在后台改点东西 → 在平台手动 Redeploy 一次 → 改动还在 = 持久磁盘 OK
 5. ✅ 手机打开域名，走一遍：输观看码 → 进直播间 → 视频播放 → 发评论
 
+## 商城 / Stripe 支付接入（可选，配了才有支付）
+
+直播间可开启「商城」：购物车入口 + 定时弹出课程小卡 + 半屏商品弹窗（推荐商品 / 优惠券 / 订单），下单走 **Stripe Embedded Checkout**（官方收银台以 iframe 内嵌进弹窗，不碰卡号，最安全）。
+
+### 1. 配 3 个环境变量（在平台面板手填，不进仓库）
+- `STRIPE_SECRET_KEY`：Stripe 后台 → Developers → API keys 的 **Secret key**（`sk_test_...` 先用测试，`sk_live_...` 正式）
+- `STRIPE_PUBLISHABLE_KEY`：同页的 **Publishable key**（`pk_test_...` / `pk_live_...`，公开，会下发前端）
+- `STRIPE_WEBHOOK_SECRET`：见下一步
+
+> 不配这些也能跑：商城可浏览，但点购买会提示「支付未配置」。
+
+### 2. 配 Webhook（支付成功的权威来源）
+- Stripe 后台 → Developers → **Webhooks** → Add endpoint
+- Endpoint URL 填：`https://你的域名/api/stripe/webhook`
+- 监听事件勾：`checkout.session.completed`（建议再勾 `checkout.session.async_payment_succeeded`）
+- 创建后把该 endpoint 的 **Signing secret**（`whsec_...`）填到环境变量 `STRIPE_WEBHOOK_SECRET`
+- 本地联调：`stripe listen --forward-to localhost:3000/api/stripe/webhook`，把它打印的 `whsec_...` 设进环境变量
+
+### 3. 测试支付
+- 测试卡号 `4242 4242 4242 4242`，有效期填任意未来日期，CVC 任意 3 位，邮编任意
+- 付款后会跳回直播间显示「支付成功」，后台「订单」标签该单状态变 `paid`
+
+### 4. ⚠️ 商户国家与货币（重要）
+- **Stripe 商户主体必须注册在受支持国家**：**新加坡、马来西亚、香港等可以；中国大陆和台湾不能作为收款主体**。公司实体在 SG/MY 就在当地注册 Stripe 账户。
+- **顾客**在 SG / MY / TW 等地都能正常付款，不受商户国家限制。
+- 收款**货币每个直播间可配**（直播间配置 → 收款货币）。跨境受众建议用 **USD**；SG 实体也可用 **SGD**。金额按「主单位 ×100」转最小货币单位，故请用 2 位小数货币（已内置 usd/sgd/myr/hkd/aud/eur/gbp/cny）。
+
+---
+
 ## 重要约束
 
 - **只能单实例运行**：用了内存缓存 + 文件存储，不要把实例数 / 副本数调成多个，否则数据不一致

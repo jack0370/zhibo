@@ -27,6 +27,10 @@
         <button class="tab" data-tab="comments">用户评论</button>
         <button class="tab" data-tab="viewers">观看记录</button>
         <button class="tab" data-tab="codes">观看码</button>
+        <button class="tab" data-tab="products">商品</button>
+        <button class="tab" data-tab="coupons">优惠券</button>
+        <button class="tab" data-tab="promos">促销弹窗</button>
+        <button class="tab" data-tab="orders">订单</button>
       </nav>
       <div class="appbar-right">
         <button id="backToListBtn" class="btn btn-ghost sm" hidden>← 直播间列表</button>
@@ -103,6 +107,22 @@
             </select>
           </label>
           <label class="chk"><input id="r_requireAccessCode" type="checkbox"> 需要观看码才能进入（开启后没有有效观看码的人进不来，到「观看码」标签页管理）</label>
+          <label class="chk"><input id="r_shopEnabled" type="checkbox"> 开启商城（显示购物车入口，到「商品/优惠券/促销弹窗」标签页配置）</label>
+          <div class="row">
+            <label>店铺名（商品弹窗头部）<input id="r_shopName" class="inp" maxlength="50" placeholder="留空则用直播间名称"></label>
+            <label>收款货币（Stripe）
+              <select id="r_currency" class="inp">
+                <option value="usd">美元 USD</option>
+                <option value="sgd">新加坡元 SGD</option>
+                <option value="myr">马来西亚林吉特 MYR</option>
+                <option value="hkd">港币 HKD</option>
+                <option value="aud">澳元 AUD</option>
+                <option value="eur">欧元 EUR</option>
+                <option value="gbp">英镑 GBP</option>
+                <option value="cny">人民币 CNY</option>
+              </select>
+            </label>
+          </div>
           <label>开播时间（设为未来=预约，到点观众自动开播；留空=未设）
             <input id="r_liveStartAt_input" class="inp" type="datetime-local">
           </label>
@@ -194,6 +214,85 @@
               <th>观看码</th><th>昵称</th><th>地区</th><th>有效期</th><th>状态</th><th>已用次数</th><th>操作</th>
             </tr></thead>
             <tbody id="codeRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 商品 -->
+      <section class="panel" data-panel="products" hidden>
+        <div class="panel-head">
+          <h2>商品管理</h2>
+          <button id="addProductBtn" class="btn btn-primary sm">+ 新增商品</button>
+        </div>
+        <p class="tip">价格用「主单位」填（如 USD 5980 就填 5980）。原价大于现价时前台会显示划线价。下单时金额由服务端按这里的价计算，不受前端影响。</p>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>图</th><th>标题</th><th>现价</th><th>原价</th><th>排序</th><th>启用</th><th>操作</th>
+            </tr></thead>
+            <tbody id="productRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 优惠券 -->
+      <section class="panel" data-panel="coupons" hidden>
+        <div class="panel-head">
+          <h2>优惠券管理（满减）</h2>
+          <button id="addCouponBtn" class="btn btn-primary sm">+ 新增优惠券</button>
+        </div>
+        <p class="tip">满减券：商品现价 ≥「满」门槛时，下单减去「减」的金额（真实抵扣，服务端校验）。金额单位同商品。</p>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>名称</th><th>满</th><th>减</th><th>有效期</th><th>排序</th><th>启用</th><th>操作</th>
+            </tr></thead>
+            <tbody id="couponRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 促销弹窗 -->
+      <section class="panel" data-panel="promos" hidden>
+        <div class="panel-head">
+          <h2>手动推送（直播中上链接）</h2>
+        </div>
+        <p class="tip">直播过程中随时把某个商品弹到前台直播间，类似「上链接」。点「推送」前台几秒内弹出小卡，点「收起」撤下。</p>
+        <div class="live-promo-bar">
+          <select id="lp_productId" class="inp"></select>
+          <button id="lpPushBtn" class="btn btn-primary sm">推送到直播间</button>
+          <button id="lpClearBtn" class="btn btn-ghost sm">收起</button>
+          <span id="lpStatus" class="live-promo-status">未推送</span>
+        </div>
+
+        <div class="panel-head" style="margin-top:22px">
+          <h2>定时促销弹窗</h2>
+          <button id="addPromoBtn" class="btn btn-primary sm">+ 新增弹窗</button>
+        </div>
+        <p class="tip">「出现时间」= 开播后第几秒，自动弹出对应商品的促销小卡；「持续秒数」后自动收起（迟到进来超过窗口的不再弹）。点小卡直接进结账。</p>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>时间(秒)</th><th>商品</th><th>持续(秒)</th><th>启用</th><th>操作</th>
+            </tr></thead>
+            <tbody id="promoRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 订单 -->
+      <section class="panel" data-panel="orders" hidden>
+        <div class="panel-head">
+          <h2>订单</h2>
+          <button id="refreshOrdersBtn" class="btn btn-ghost sm">刷新</button>
+        </div>
+        <p class="tip">用户通过 Stripe 下单的记录。状态 paid=已支付（以 Stripe webhook 为准）/ pending=待支付。</p>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>时间</th><th>商品</th><th>金额</th><th>优惠</th><th>买家</th><th>邮箱</th><th>状态</th>
+            </tr></thead>
+            <tbody id="orderRows"></tbody>
           </table>
         </div>
       </section>
@@ -291,6 +390,67 @@
       <div class="modal-actions">
         <button id="createCancel" class="btn btn-ghost">取消</button>
         <button id="createDo" class="btn btn-primary">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 商品编辑弹层 -->
+  <div class="modal-mask" id="productModal" hidden>
+    <div class="modal">
+      <h3 id="productModalTitle">新增商品</h3>
+      <label>标题<input id="pr_title" class="inp" maxlength="100"></label>
+      <label>图片 URL<input id="pr_image" class="inp" maxlength="500" placeholder="https://..."></label>
+      <label>收款链接（点「马上抢」跳这里）<input id="pr_payUrl" class="inp" maxlength="1000" placeholder="https://www.paypal.com/..."></label>
+      <div class="row">
+        <label>现价<input id="pr_price" class="inp" type="number" min="0" step="0.01"></label>
+        <label>原价（划线价，可选）<input id="pr_originalPrice" class="inp" type="number" min="0" step="0.01"></label>
+      </div>
+      <label>描述（可选）<textarea id="pr_desc" class="inp ta" rows="2" maxlength="500"></textarea></label>
+      <div class="row">
+        <label>排序（小在前）<input id="pr_sort" class="inp" type="number" value="0"></label>
+      </div>
+      <label class="chk"><input id="pr_enabled" type="checkbox" checked> 启用（前台展示）</label>
+      <div class="modal-actions">
+        <button id="productCancel" class="btn btn-ghost">取消</button>
+        <button id="productSave" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 优惠券编辑弹层 -->
+  <div class="modal-mask" id="couponModal" hidden>
+    <div class="modal">
+      <h3 id="couponModalTitle">新增优惠券</h3>
+      <label>名称<input id="cp_title" class="inp" maxlength="50" placeholder="如 新人专享券"></label>
+      <div class="row">
+        <label>满（门槛）<input id="cp_threshold" class="inp" type="number" min="0" step="0.01"></label>
+        <label>减（金额）<input id="cp_amount" class="inp" type="number" min="0" step="0.01"></label>
+      </div>
+      <label>有效期至（留空 = 长期有效）<input id="cp_expireAt" class="inp" type="datetime-local"></label>
+      <label>排序（小在前）<input id="cp_sort" class="inp" type="number" value="0"></label>
+      <label class="chk"><input id="cp_enabled" type="checkbox" checked> 启用</label>
+      <div class="modal-actions">
+        <button id="couponCancel" class="btn btn-ghost">取消</button>
+        <button id="couponSave" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 促销弹窗编辑弹层 -->
+  <div class="modal-mask" id="promoModal" hidden>
+    <div class="modal">
+      <h3 id="promoModalTitle">新增促销弹窗</h3>
+      <label>关联商品
+        <select id="pm_productId" class="inp"></select>
+      </label>
+      <div class="row">
+        <label>出现时间(开播后秒)<input id="pm_time" class="inp" type="number" min="0"></label>
+        <label>持续秒数<input id="pm_durationSec" class="inp" type="number" min="0" value="20"></label>
+      </div>
+      <label class="chk"><input id="pm_enabled" type="checkbox" checked> 启用</label>
+      <div class="modal-actions">
+        <button id="promoCancel" class="btn btn-ghost">取消</button>
+        <button id="promoSave" class="btn btn-primary">保存</button>
       </div>
     </div>
   </div>

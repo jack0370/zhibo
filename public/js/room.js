@@ -201,7 +201,23 @@ async function pollComments() {
     } else if (added) {
       revealDueComments();           // 之后：新评论到点即揭示（直播边缘=实时）
     }
+    if ('livePromo' in data) handleLivePromo(data.livePromo); // 搭车：处理后台手动推送
   } catch (e) { /* 忽略轮询错误 */ }
+}
+
+// 后台手动推送：按 at 时间戳判断是否「新一次推送」，是则弹；变 null 则收起
+function handleLivePromo(lp) {
+  const prevAt = shop.livePromoAt || 0;
+  if (lp && lp.productId) {
+    if (lp.at && lp.at !== prevAt) {        // 新推送（或换了商品）→ 弹出，手动模式不自动收
+      shop.livePromoAt = lp.at;
+      const product = shop.products.find((x) => x.id === lp.productId);
+      if (product) showPromoPop({ productId: lp.productId, durationSec: 0 });
+    }
+  } else if (prevAt) {                       // 后台已收起 → 撤下
+    shop.livePromoAt = 0;
+    hidePromoPop();
+  }
 }
 
 /* ============================ 观看人数浮动 ============================ */
@@ -601,7 +617,8 @@ function startLiveFeed() {
   startPresence();
   backfillHistory();
   ensurePolling();
-  if (!state.tickTimer) state.tickTimer = setInterval(() => { revealDuePresets(); revealDueComments(); }, 1000);
+  if (!state.tickTimer) state.tickTimer = setInterval(() => { revealDuePresets(); revealDueComments(); revealDuePromos(); }, 1000);
+  showCartFab(); // 进入直播间后，若开启商城则显示购物车入口
   $('#feedHint').textContent = state.room.status === 'ended' ? '直播已结束 · 回放中' : '直播进行中';
   // 直播中：进场即盖上透明拦截层，任何平台都点不动、无法暂停（像真直播）。回放(ended)不锁，方便拖进度。
   // 开声音不再依赖拦截层让路 —— 由我们自己的 #soundBtn(在 guard 之上) 调 api.unmute() 接管。
@@ -702,6 +719,7 @@ function proceed() {
     ensurePolling(); // 未开播也允许评论；预设不展示
     startPresence();
     state.entered = true;
+    showCartFab();
   }
 }
 
@@ -775,6 +793,7 @@ async function init() {
   renderTopbar();
   startViewers();
   state.presets = await api.get('/api/presets?room=' + ROOM_ID); // 已排序
+  await loadShop(); // 商城数据（商品/优惠券/促销弹窗）
 
   if (room.requireAccessCode) {
     // 需要观看码：先尝试缓存的码，不行就拦门要码
@@ -783,6 +802,7 @@ async function init() {
   } else {
     proceed();
   }
+  handlePaidReturn(); // 支付返回（?paid=1）→ 展示成功态
 }
 
 /* ============================ 评论提交 ============================ */
@@ -859,5 +879,308 @@ $('#flowerBtn').addEventListener('click', () => {
   spawnFloat('🌸');
   setTimeout(() => spawnFloat('🌷'), 120);
 });
+
+/* ============================ 商城（购物车 / 课程弹窗 / 优惠券 / Stripe 结账） ============================ */
+const shop = {
+  enabled: false, shopName: '', currency: 'usd',
+  stripeReady: false, pubKey: '',
+  products: [], coupons: [],
+  promos: [], shownPromoIds: new Set(),
+  livePromoAt: 0,         // 后台手动推送：最近一次推送的时间戳（去重用）
+  pickedCouponId: null,   // 结账时选中的券
+  currentProduct: null,   // 结账中的商品
+  stripeObj: null, embedded: null // Stripe.js 实例与内嵌收银台
+};
+
+// 本机订单号缓存（订单 tab 用）：按房间隔离
+const ORDERS_KEY = 'zhibo_orders_' + ROOM_ID;
+function myOrderIds() {
+  try { return JSON.parse(localStorage.getItem(ORDERS_KEY) || '[]'); } catch (e) { return []; }
+}
+function rememberOrder(id) {
+  const ids = myOrderIds();
+  if (!ids.includes(id)) { ids.unshift(id); localStorage.setItem(ORDERS_KEY, JSON.stringify(ids.slice(0, 30))); }
+}
+
+const CURRENCY_SYMBOL = { usd: 'US$', sgd: 'S$', myr: 'RM', hkd: 'HK$', aud: 'A$', eur: '€', gbp: '£', cny: '¥' };
+function curSym() { return CURRENCY_SYMBOL[shop.currency] || (shop.currency.toUpperCase() + ' '); }
+function fmtMoney(n) {
+  const v = Number(n) || 0;
+  return curSym() + (Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2));
+}
+
+async function loadShop() {
+  try {
+    const data = await api.get('/api/shop?room=' + ROOM_ID);
+    shop.enabled = !!data.enabled;
+    shop.shopName = data.shopName || '';
+    shop.currency = (data.currency || 'usd').toLowerCase();
+    shop.stripeReady = !!data.stripeReady;
+    shop.pubKey = data.stripePublishableKey || '';
+    shop.products = data.products || [];
+    shop.coupons = data.coupons || [];
+    if (shop.enabled) shop.promos = await api.get('/api/promos?room=' + ROOM_ID);
+  } catch (e) { /* 商城拉取失败：静默，不影响直播 */ }
+}
+
+/* -------- 购物车入口（评论栏🛒 → 打开半屏商品面板） -------- */
+function showCartFab() {
+  if (!shop.enabled) return;
+  const btn = $('#cartBtn');
+  if (btn) btn.hidden = false;
+}
+$('#cartBtn').addEventListener('click', () => openShop('products'));
+
+/* -------- 定时促销小卡 -------- */
+function revealDuePromos() {
+  if (!shop.enabled || !shop.promos.length) return;
+  const e = state.room.status === 'ended' ? Infinity : elapsedSec();
+  for (const p of shop.promos) {
+    if (shop.shownPromoIds.has(p.id)) continue;
+    if (e >= p.time) {
+      shop.shownPromoIds.add(p.id);
+      // 已开播很久才进来的，跳过早就过窗口的促销；仍在持续期内的才弹
+      const dur = p.durationSec || 0;
+      if (e === Infinity || (dur > 0 && e - p.time > dur)) continue;
+      showPromoPop(p);
+    }
+  }
+}
+
+let promoHideTimer = null;
+function showPromoPop(promo) {
+  const product = shop.products.find((x) => x.id === promo.productId);
+  if (!product) return;
+  $('#promoThumb').src = product.image || '';
+  $('#promoTitle').textContent = product.title;
+  $('#promoPrice').textContent = fmtMoney(product.price);
+  const pop = $('#promoPop');
+  pop.hidden = false;
+  pop.dataset.productId = product.id;
+  clearTimeout(promoHideTimer);
+  if (promo.durationSec > 0) promoHideTimer = setTimeout(hidePromoPop, promo.durationSec * 1000);
+}
+function hidePromoPop() { const pop = $('#promoPop'); if (pop) pop.hidden = true; }
+$('#promoClose').addEventListener('click', hidePromoPop);
+$('#promoCta').addEventListener('click', () => {
+  const pid = $('#promoPop').dataset.productId;
+  hidePromoPop();
+  const product = shop.products.find((x) => x.id === pid);
+  if (product) goPay(product); else openShop('products');
+});
+
+/* -------- 商品弹窗（半屏） -------- */
+function openShop(tab) {
+  $('#shopName').textContent = shop.shopName || '课程';
+  renderProducts();
+  renderCoupons();
+  $('#shopMask').hidden = false;
+  switchShopTab(tab || 'products');
+}
+function closeShop() {
+  $('#shopMask').hidden = true;
+  destroyEmbedded();
+}
+$('#shopClose').addEventListener('click', closeShop);
+$('#shopMask').addEventListener('click', (e) => { if (e.target === $('#shopMask')) closeShop(); });
+
+function switchShopTab(tab) {
+  document.querySelectorAll('.shop-tab').forEach((b) => b.classList.toggle('active', b.dataset.stab === tab));
+  document.querySelectorAll('.shop-panel').forEach((p) => { p.hidden = p.dataset.spanel !== tab; });
+  if (tab === 'orders') renderOrders();
+}
+document.querySelectorAll('.shop-tab').forEach((b) => {
+  b.addEventListener('click', () => switchShopTab(b.dataset.stab));
+});
+
+/* -------- 点击购买：跳商品配置的收款链接（新标签页） -------- */
+function goPay(product) {
+  if (!product || !product.payUrl) { toast('该商品暂未配置支付链接'); return; }
+  window.open(product.payUrl, '_blank', 'noopener');
+}
+
+function renderProducts() {
+  const box = $('#productList');
+  if (!shop.products.length) { box.innerHTML = '<div class="shop-empty">暂无课程</div>'; return; }
+  box.innerHTML = shop.products.map((p) => `
+    <div class="product-card">
+      ${p.image ? `<img class="pc-img" src="${escapeHtml(p.image)}" alt="">` : '<div class="pc-img"></div>'}
+      <div class="pc-main">
+        <div class="pc-title">${escapeHtml(p.title)}</div>
+        ${p.desc ? `<div class="pc-desc">${escapeHtml(p.desc)}</div>` : ''}
+        <div class="pc-bottom">
+          <div>
+            <span class="pc-price">${escapeHtml(fmtMoney(p.price))}</span>
+            ${p.originalPrice > p.price ? `<span class="pc-orig">${escapeHtml(fmtMoney(p.originalPrice))}</span>` : ''}
+          </div>
+          <button class="pc-buy" data-id="${escapeHtml(p.id)}">马上抢</button>
+        </div>
+      </div>
+    </div>`).join('');
+  box.querySelectorAll('.pc-buy').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const product = shop.products.find((x) => x.id === btn.dataset.id);
+      if (product) goPay(product);
+    });
+  });
+}
+
+function renderCoupons() {
+  const box = $('#couponList');
+  if (!shop.coupons.length) { box.innerHTML = '<div class="shop-empty">暂无优惠券</div>'; return; }
+  box.innerHTML = shop.coupons.map((c) => `
+    <div class="coupon-card">
+      <div class="cc-amt">
+        <div><span class="cc-cur">${escapeHtml(curSym())}</span><span class="cc-num">${escapeHtml(String(c.amount))}</span></div>
+        <div class="cc-cond">满${escapeHtml(fmtMoney(c.threshold))}可用</div>
+      </div>
+      <div class="cc-main">
+        <div class="cc-title">${escapeHtml(c.title)}</div>
+        <div class="cc-exp">${c.expireAt ? '有效期至 ' + new Date(c.expireAt).toLocaleDateString() : '长期有效'}</div>
+      </div>
+    </div>`).join('');
+}
+
+async function renderOrders() {
+  const box = $('#orderList');
+  const ids = myOrderIds();
+  if (!ids.length) { box.innerHTML = '<div class="shop-empty">还没有订单</div>'; return; }
+  box.innerHTML = '<div class="shop-empty">加载中…</div>';
+  const STATUS_TXT = { paid: '已支付', pending: '待支付', failed: '支付失败' };
+  const cards = [];
+  for (const id of ids) {
+    try {
+      const o = await api.get('/api/order-status?id=' + encodeURIComponent(id));
+      cards.push(`<div class="order-card">
+        <div class="oc-row"><span class="oc-title">${escapeHtml(o.productTitle || '课程')}</span>
+          <span class="oc-status ${o.status}">${STATUS_TXT[o.status] || o.status}</span></div>
+        <div class="oc-row"><span>${escapeHtml(curSym() + (o.amount || 0))}</span></div>
+      </div>`);
+    } catch (e) { /* 单个订单查不到就跳过 */ }
+  }
+  box.innerHTML = cards.length ? cards.join('') : '<div class="shop-empty">还没有订单</div>';
+}
+
+/* -------- 结账（内嵌 Stripe Embedded Checkout） -------- */
+function applicableCoupons(product) {
+  return shop.coupons.filter((c) => Number(product.price) >= Number(c.threshold));
+}
+
+function startCheckout(product) {
+  shop.currentProduct = product;
+  shop.pickedCouponId = null;
+  $('#shopMask').hidden = false;
+  switchShopTab('checkout');
+  renderCheckout();
+}
+
+function renderCheckout() {
+  const p = shop.currentProduct;
+  const coupons = applicableCoupons(p);
+  const picked = coupons.find((c) => c.id === shop.pickedCouponId);
+  const discount = picked ? Number(picked.amount) : 0;
+  const final = Math.max(0, Number(p.price) - discount);
+
+  $('#checkoutSummary').innerHTML = `
+    <div class="cs-line"><span>${escapeHtml(p.title)}</span><span>${escapeHtml(fmtMoney(p.price))}</span></div>
+    ${discount ? `<div class="cs-line"><span>优惠券</span><span>-${escapeHtml(fmtMoney(discount))}</span></div>` : ''}
+    <div class="cs-line cs-total"><span>应付</span><span>${escapeHtml(fmtMoney(final))}</span></div>`;
+
+  const ck = $('#checkoutCoupons');
+  if (coupons.length) {
+    ck.innerHTML = coupons.map((c) => `
+      <div class="ck-opt ${c.id === shop.pickedCouponId ? 'active' : ''}" data-id="${escapeHtml(c.id)}">
+        <span>${escapeHtml(c.title)} <span class="ck-tag">满${escapeHtml(fmtMoney(c.threshold))}减${escapeHtml(fmtMoney(c.amount))}</span></span>
+        <span>${c.id === shop.pickedCouponId ? '✓ 已选' : '使用'}</span>
+      </div>`).join('');
+    ck.querySelectorAll('.ck-opt').forEach((el) => {
+      el.addEventListener('click', () => {
+        shop.pickedCouponId = (shop.pickedCouponId === el.dataset.id) ? null : el.dataset.id;
+        destroyEmbedded();      // 改价了，重建收银台
+        renderCheckout();
+      });
+    });
+  } else { ck.innerHTML = ''; }
+
+  mountEmbeddedCheckout();
+}
+
+function destroyEmbedded() {
+  if (shop.embedded) { try { shop.embedded.destroy(); } catch (e) {} shop.embedded = null; }
+  const box = $('#stripeBox'); if (box) box.innerHTML = '';
+}
+
+// 懒加载 Stripe.js（仅商城用，加载一次）
+let stripeJsLoading = null;
+function loadStripeJs(cb) {
+  if (window.Stripe) { cb(); return; }
+  if (stripeJsLoading) { stripeJsLoading.push(cb); return; }
+  stripeJsLoading = [cb];
+  const s = document.createElement('script');
+  s.src = 'https://js.stripe.com/v3/';
+  s.onload = () => { const q = stripeJsLoading; stripeJsLoading = []; q.forEach((f) => f()); };
+  s.onerror = () => { stripeJsLoading = null; toast('支付组件加载失败'); };
+  document.head.appendChild(s);
+}
+
+async function mountEmbeddedCheckout() {
+  if (!shop.stripeReady) { $('#stripeBox').innerHTML = '<div class="checkout-loading">支付未配置，暂不可购买</div>'; return; }
+  if (shop.embedded) return; // 已挂载
+  const loading = $('#checkoutLoading');
+  if (loading) loading.hidden = false;
+  let order;
+  try {
+    order = await api.post('/api/checkout', {
+      roomId: ROOM_ID,
+      productId: shop.currentProduct.id,
+      couponId: shop.pickedCouponId || undefined,
+      nickname: ME.nickname, region: ME.region, clientId: ME.clientId
+    });
+  } catch (e) {
+    if (loading) loading.hidden = true;
+    $('#stripeBox').innerHTML = '<div class="checkout-loading">' + escapeHtml(e.message || '下单失败') + '</div>';
+    return;
+  }
+  rememberOrder(order.orderId);
+  loadStripeJs(async () => {
+    try {
+      if (!shop.stripeObj) shop.stripeObj = window.Stripe(shop.pubKey);
+      shop.embedded = await shop.stripeObj.initEmbeddedCheckout({ clientSecret: order.clientSecret });
+      if (loading) loading.hidden = true;
+      shop.embedded.mount('#stripeBox');
+    } catch (e) {
+      if (loading) loading.hidden = true;
+      $('#stripeBox').innerHTML = '<div class="checkout-loading">收银台加载失败</div>';
+    }
+  });
+}
+
+$('#checkoutBack').addEventListener('click', () => { destroyEmbedded(); switchShopTab('products'); });
+
+/* -------- 支付成功返回（Stripe return_url ?paid=1&order=...） -------- */
+function handlePaidReturn() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('paid') !== '1') return;
+  const orderId = q.get('order') || '';
+  if (orderId) rememberOrder(orderId);
+  // 清掉 URL 上的支付参数，避免刷新重复触发
+  const clean = location.pathname;
+  history.replaceState(null, '', clean);
+  // 展示成功态并轮询确认
+  $('#shopName').textContent = shop.shopName || '课程';
+  $('#shopMask').hidden = false;
+  switchShopTab('done');
+  $('#payDoneSub').textContent = '订单确认中…';
+  pollPaid(orderId);
+}
+function pollPaid(orderId, tries) {
+  tries = tries || 0;
+  if (!orderId || tries > 10) { $('#payDoneSub').textContent = '感谢购买，我们会尽快为你开通课程。'; return; }
+  api.get('/api/order-status?id=' + encodeURIComponent(orderId)).then((o) => {
+    if (o.status === 'paid') { $('#payDoneSub').textContent = '已支付 ' + fmtMoney(o.amount) + '，感谢购买！'; }
+    else setTimeout(() => pollPaid(orderId, tries + 1), 1500);
+  }).catch(() => setTimeout(() => pollPaid(orderId, tries + 1), 1500));
+}
+$('#payDoneBtn').addEventListener('click', closeShop);
 
 init();

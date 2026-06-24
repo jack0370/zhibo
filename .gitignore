@@ -1,5 +1,7 @@
 node_modules/
 data/db.json
+.env
+.claude/
 npm-debug.log*
 .DS_Store
 *.log

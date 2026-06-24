@@ -127,6 +127,12 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color:
 .modal label { margin-bottom: 12px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
 
+/* 手动推送条 */
+.live-promo-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.live-promo-bar .inp { flex: 0 1 280px; }
+.live-promo-status { font-size: 13px; color: #8990a6; }
+.live-promo-status.on { color: var(--ok, #1aab5b); font-weight: 700; }
+
 /* toast */
 .toast {
   position: fixed; left: 50%; top: 70px; transform: translateX(-50%);

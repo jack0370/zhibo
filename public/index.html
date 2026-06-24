@@ -62,6 +62,17 @@
         </div>
       </div>
 
+      <!-- 定时促销小卡（到点自动弹出，点击打开商品面板） -->
+      <div class="promo-pop" id="promoPop" hidden>
+        <button class="promo-close" id="promoClose" aria-label="关闭">×</button>
+        <img class="promo-thumb" id="promoThumb" alt="">
+        <div class="promo-body">
+          <div class="promo-title" id="promoTitle"></div>
+          <div class="promo-price"><span class="promo-now" id="promoPrice"></span></div>
+        </div>
+        <button class="promo-cta" id="promoCta">马上抢</button>
+      </div>
+
       <!-- 进入直播间遮罩 -->
       <div class="enter-mask" id="enterMask" hidden>
         <div class="enter-card">
@@ -79,11 +90,58 @@
              placeholder="说点什么…" maxlength="200" autocomplete="off">
       <button id="flowerBtn" class="icon-btn" aria-label="送小花">🌸</button>
       <button id="likeBtn" class="icon-btn" aria-label="点赞">❤️</button>
+      <button id="cartBtn" class="icon-btn" aria-label="课程" hidden>🛒</button>
       <button id="sendBtn" class="send-btn">发送</button>
     </footer>
 
     <!-- 点赞/送花 飘动图层 -->
     <div class="float-layer" id="floatLayer"></div>
+  </div>
+
+  <!-- 商品弹窗（半屏 bottom sheet：推荐商品 / 优惠券 / 订单 / 结账） -->
+  <div class="shop-sheet-mask" id="shopMask" hidden>
+    <div class="shop-sheet" id="shopSheet">
+      <div class="shop-head">
+        <div class="shop-name" id="shopName">店铺</div>
+        <button class="shop-close" id="shopClose" aria-label="关闭">×</button>
+      </div>
+      <div class="shop-tabs" id="shopTabs">
+        <button class="shop-tab active" data-stab="products">推荐商品</button>
+        <button class="shop-tab" data-stab="coupons" hidden>优惠券</button>
+        <button class="shop-tab" data-stab="orders" hidden>订单</button>
+      </div>
+      <div class="shop-body">
+        <!-- 推荐商品 -->
+        <div class="shop-panel" data-spanel="products">
+          <div id="productList" class="product-list"></div>
+        </div>
+        <!-- 优惠券 -->
+        <div class="shop-panel" data-spanel="coupons" hidden>
+          <div id="couponList" class="coupon-list"></div>
+        </div>
+        <!-- 订单 -->
+        <div class="shop-panel" data-spanel="orders" hidden>
+          <div id="orderList" class="order-list"></div>
+        </div>
+        <!-- 结账（内嵌 Stripe Embedded Checkout） -->
+        <div class="shop-panel" data-spanel="checkout" hidden>
+          <button class="checkout-back" id="checkoutBack">← 返回</button>
+          <div class="checkout-summary" id="checkoutSummary"></div>
+          <div class="checkout-coupons" id="checkoutCoupons"></div>
+          <div id="stripeBox" class="stripe-box"></div>
+          <div class="checkout-loading" id="checkoutLoading" hidden>正在加载收银台…</div>
+        </div>
+        <!-- 支付成功 -->
+        <div class="shop-panel" data-spanel="done" hidden>
+          <div class="pay-done">
+            <div class="pay-done-ico">✅</div>
+            <div class="pay-done-title">支付成功</div>
+            <div class="pay-done-sub" id="payDoneSub"></div>
+            <button class="btn-primary pay-done-btn" id="payDoneBtn">继续观看直播</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 观看码准入门（开启时拦在最前面） -->

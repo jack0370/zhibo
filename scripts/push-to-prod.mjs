@@ -40,7 +40,8 @@ for (const room of rooms) {
     videoType: room.videoType || 'voomly',
     videoEmbed: room.videoEmbed, hlsUrl: room.hlsUrl || '',
     orientation: room.orientation,
-    cover: room.cover, requireAccessCode: room.requireAccessCode
+    cover: room.cover, requireAccessCode: room.requireAccessCode,
+    shopEnabled: room.shopEnabled, shopName: room.shopName, currency: room.currency
   });
 
   const presets = db.presets.filter((p) => p.roomId === room.id)
@@ -53,7 +54,33 @@ for (const room of rooms) {
       ({ code, nickname, region, expireAt, enabled, note }));
   if (codes.length) await api('POST', '/api/admin/codes/import', { roomId: id, items: codes, mode: 'replace' });
 
+  // 商城：商品 / 优惠券 / 促销弹窗（逐条 POST；记录 商品旧id→新id 供促销弹窗重映射）
+  const products = (db.products || []).filter((p) => p.roomId === room.id);
+  const productIdMap = {};
+  for (const p of products) {
+    const created = await api('POST', '/api/admin/products', {
+      roomId: id, title: p.title, image: p.image, price: p.price,
+      originalPrice: p.originalPrice, desc: p.desc, enabled: p.enabled, sort: p.sort
+    });
+    productIdMap[p.id] = created.id;
+  }
+  const coupons = (db.coupons || []).filter((c) => c.roomId === room.id);
+  for (const c of coupons) {
+    await api('POST', '/api/admin/coupons', {
+      roomId: id, title: c.title, threshold: c.threshold, amount: c.amount,
+      expireAt: c.expireAt, enabled: c.enabled, sort: c.sort
+    });
+  }
+  const promos = (db.promos || []).filter((p) => p.roomId === room.id);
+  for (const p of promos) {
+    const newPid = productIdMap[p.productId];
+    if (!newPid) continue; // 关联商品没同步成功就跳过
+    await api('POST', '/api/admin/promos', {
+      roomId: id, productId: newPid, time: p.time, durationSec: p.durationSec, enabled: p.enabled
+    });
+  }
+
   console.log(`✓ 已上传「${room.name}」`);
-  console.log(`   链接: ${BASE}/r/${id}   (预设 ${presets.length} 条, 观看码 ${codes.length} 个)`);
+  console.log(`   链接: ${BASE}/r/${id}   (预设 ${presets.length} 条, 观看码 ${codes.length} 个, 商品 ${products.length} 个, 券 ${coupons.length} 张, 促销 ${promos.length} 条)`);
 }
 console.log('全部完成。线上后台刷新即可看到，记得到对应直播间点「立即开播」。');

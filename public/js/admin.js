@@ -135,6 +135,10 @@ $$('.tab').forEach((tab) => {
     if (name === 'room') loadRoom();
     if (name === 'codes') loadCodes();
     if (name === 'viewers') { loadViewers(); startViewersAutoRefresh(); }
+    if (name === 'products') loadProducts();
+    if (name === 'coupons') loadCoupons();
+    if (name === 'promos') loadPromos();
+    if (name === 'orders') loadOrders();
   };
 });
 
@@ -155,6 +159,9 @@ async function loadRoom() {
   toggleVideoFields();
   $('#r_orientation').value = r.orientation || 'landscape';
   $('#r_requireAccessCode').checked = !!r.requireAccessCode;
+  $('#r_shopEnabled').checked = !!r.shopEnabled;
+  $('#r_shopName').value = r.shopName || '';
+  $('#r_currency').value = r.currency || 'usd';
   $('#r_liveStartAt_input').value = r.liveStartAt ? toLocalInput(r.liveStartAt) : '';
   // 只读提示：区分「已开播 / 已预约（未来时间）/ 未设」
   let lbl = '未开播';
@@ -191,6 +198,9 @@ $('#saveRoomBtn').onclick = async () => {
     hlsUrl: $('#r_hlsUrl').value,
     orientation: $('#r_orientation').value,
     requireAccessCode: $('#r_requireAccessCode').checked,
+    shopEnabled: $('#r_shopEnabled').checked,
+    shopName: $('#r_shopName').value,
+    currency: $('#r_currency').value,
     liveStartAt: $('#r_liveStartAt_input').value ? new Date($('#r_liveStartAt_input').value).getTime() : null
   });
   toast('配置已保存');
@@ -467,6 +477,247 @@ $('#codeImportDo').onclick = async () => {
   const res = await req('POST', '/api/admin/codes/import', { items, mode: $('#codeImportReplace').checked ? 'replace' : 'append', roomId: currentRoomId });
   $('#codeImportModal').hidden = true; toast(`导入成功，新增 ${res.added} 条`); loadCodes();
 };
+
+/* ============================ 商品 ============================ */
+let editingProductId = null;
+let roomCurrency = 'usd'; // 当前房间货币（loadRoom 时更新，用于展示）
+const CUR_SYM = { usd: 'US$', sgd: 'S$', myr: 'RM', hkd: 'HK$', aud: 'A$', eur: '€', gbp: '£', cny: '¥' };
+function money(n) { return (CUR_SYM[roomCurrency] || (roomCurrency.toUpperCase() + ' ')) + (Number(n) || 0); }
+
+async function loadProducts() {
+  roomCurrency = $('#r_currency').value || 'usd';
+  const list = await req('GET', '/api/admin/products?room=' + currentRoomId);
+  const tbody = $('#productRows');
+  tbody.innerHTML = '';
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:#8990a6">暂无商品，点「新增商品」</td></tr>'; return; }
+  for (const p of list) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${p.image ? `<img src="${esc(p.image)}" style="width:48px;height:36px;object-fit:cover;border-radius:4px">` : '—'}</td>
+      <td><div class="cell-content">${esc(p.title)}</div></td>
+      <td>${esc(money(p.price))}</td>
+      <td>${p.originalPrice ? esc(money(p.originalPrice)) : '—'}</td>
+      <td>${p.sort || 0}</td>
+      <td><span class="switch tag ${p.enabled ? 'visible' : 'hidden'}" data-id="${p.id}">${p.enabled ? '启用' : '停用'}</span></td>
+      <td><div class="op">
+        <button class="mini" data-edit="${p.id}">编辑</button>
+        <button class="mini danger" data-del="${p.id}">删除</button>
+      </div></td>`;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openProductModal(list.find((x) => x.id === b.dataset.edit)));
+  tbody.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!confirm('删除这个商品？')) return;
+    await req('DELETE', '/api/admin/products/' + b.dataset.del); toast('已删除'); loadProducts();
+  });
+  tbody.querySelectorAll('.switch').forEach((s) => s.onclick = async () => {
+    const p = list.find((x) => x.id === s.dataset.id);
+    await req('PUT', '/api/admin/products/' + p.id, { enabled: !p.enabled }); loadProducts();
+  });
+}
+
+function openProductModal(p) {
+  editingProductId = p ? p.id : null;
+  $('#productModalTitle').textContent = p ? '编辑商品' : '新增商品';
+  $('#pr_title').value = p ? p.title : '';
+  $('#pr_image').value = p ? p.image : '';
+  $('#pr_payUrl').value = p ? (p.payUrl || '') : '';
+  $('#pr_price').value = p ? p.price : '';
+  $('#pr_originalPrice').value = p ? (p.originalPrice || '') : '';
+  $('#pr_desc').value = p ? (p.desc || '') : '';
+  $('#pr_sort').value = p ? (p.sort || 0) : 0;
+  $('#pr_enabled').checked = p ? p.enabled : true;
+  $('#productModal').hidden = false;
+}
+$('#addProductBtn').onclick = () => openProductModal(null);
+$('#productCancel').onclick = () => { $('#productModal').hidden = true; };
+$('#productSave').onclick = async () => {
+  const body = {
+    title: $('#pr_title').value.trim(), image: $('#pr_image').value.trim(),
+    payUrl: $('#pr_payUrl').value.trim(),
+    price: $('#pr_price').value, originalPrice: $('#pr_originalPrice').value,
+    desc: $('#pr_desc').value, sort: $('#pr_sort').value, enabled: $('#pr_enabled').checked
+  };
+  if (!body.title) { toast('请填写标题'); return; }
+  if (editingProductId) await req('PUT', '/api/admin/products/' + editingProductId, body);
+  else await req('POST', '/api/admin/products', { ...body, roomId: currentRoomId });
+  $('#productModal').hidden = true; toast('已保存'); loadProducts();
+};
+
+/* ============================ 优惠券 ============================ */
+let editingCouponId = null;
+
+async function loadCoupons() {
+  roomCurrency = $('#r_currency').value || 'usd';
+  const list = await req('GET', '/api/admin/coupons?room=' + currentRoomId);
+  const tbody = $('#couponRows');
+  tbody.innerHTML = '';
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:#8990a6">暂无优惠券，点「新增优惠券」</td></tr>'; return; }
+  for (const c of list) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${esc(c.title)}</td>
+      <td>${esc(money(c.threshold))}</td>
+      <td>${esc(money(c.amount))}</td>
+      <td style="white-space:nowrap">${c.expireAt ? fmtTime(c.expireAt) : '长期'}</td>
+      <td>${c.sort || 0}</td>
+      <td><span class="switch tag ${c.enabled ? 'visible' : 'hidden'}" data-id="${c.id}">${c.enabled ? '启用' : '停用'}</span></td>
+      <td><div class="op">
+        <button class="mini" data-edit="${c.id}">编辑</button>
+        <button class="mini danger" data-del="${c.id}">删除</button>
+      </div></td>`;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openCouponModal(list.find((x) => x.id === b.dataset.edit)));
+  tbody.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!confirm('删除这个优惠券？')) return;
+    await req('DELETE', '/api/admin/coupons/' + b.dataset.del); toast('已删除'); loadCoupons();
+  });
+  tbody.querySelectorAll('.switch').forEach((s) => s.onclick = async () => {
+    const c = list.find((x) => x.id === s.dataset.id);
+    await req('PUT', '/api/admin/coupons/' + c.id, { enabled: !c.enabled }); loadCoupons();
+  });
+}
+
+function openCouponModal(c) {
+  editingCouponId = c ? c.id : null;
+  $('#couponModalTitle').textContent = c ? '编辑优惠券' : '新增优惠券';
+  $('#cp_title').value = c ? c.title : '';
+  $('#cp_threshold').value = c ? c.threshold : '';
+  $('#cp_amount').value = c ? c.amount : '';
+  $('#cp_expireAt').value = c && c.expireAt ? toLocalInput(c.expireAt) : '';
+  $('#cp_sort').value = c ? (c.sort || 0) : 0;
+  $('#cp_enabled').checked = c ? c.enabled : true;
+  $('#couponModal').hidden = false;
+}
+$('#addCouponBtn').onclick = () => openCouponModal(null);
+$('#couponCancel').onclick = () => { $('#couponModal').hidden = true; };
+$('#couponSave').onclick = async () => {
+  const body = {
+    title: $('#cp_title').value.trim(),
+    threshold: $('#cp_threshold').value, amount: $('#cp_amount').value,
+    expireAt: $('#cp_expireAt').value ? new Date($('#cp_expireAt').value).getTime() : null,
+    sort: $('#cp_sort').value, enabled: $('#cp_enabled').checked
+  };
+  if (!body.title) { toast('请填写名称'); return; }
+  if (editingCouponId) await req('PUT', '/api/admin/coupons/' + editingCouponId, body);
+  else await req('POST', '/api/admin/coupons', { ...body, roomId: currentRoomId });
+  $('#couponModal').hidden = true; toast('已保存'); loadCoupons();
+};
+
+/* ============================ 促销弹窗 ============================ */
+let editingPromoId = null;
+let promoProductsCache = [];
+
+async function loadPromos() {
+  const [list, products] = await Promise.all([
+    req('GET', '/api/admin/promos?room=' + currentRoomId),
+    req('GET', '/api/admin/products?room=' + currentRoomId)
+  ]);
+  promoProductsCache = products;
+  const pmap = {}; products.forEach((p) => { pmap[p.id] = p.title; });
+  const tbody = $('#promoRows');
+  tbody.innerHTML = '';
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="5" style="color:#8990a6">暂无促销弹窗，点「新增弹窗」</td></tr>'; return; }
+  for (const p of list) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${p.time}</td>
+      <td><div class="cell-content">${esc(pmap[p.productId] || '(商品已删除)')}</div></td>
+      <td>${p.durationSec}</td>
+      <td><span class="switch tag ${p.enabled ? 'visible' : 'hidden'}" data-id="${p.id}">${p.enabled ? '启用' : '停用'}</span></td>
+      <td><div class="op">
+        <button class="mini" data-edit="${p.id}">编辑</button>
+        <button class="mini danger" data-del="${p.id}">删除</button>
+      </div></td>`;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openPromoModal(list.find((x) => x.id === b.dataset.edit)));
+  tbody.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!confirm('删除这条促销弹窗？')) return;
+    await req('DELETE', '/api/admin/promos/' + b.dataset.del); toast('已删除'); loadPromos();
+  });
+  tbody.querySelectorAll('.switch').forEach((s) => s.onclick = async () => {
+    const p = list.find((x) => x.id === s.dataset.id);
+    await req('PUT', '/api/admin/promos/' + p.id, { enabled: !p.enabled }); loadPromos();
+  });
+  // 手动推送：填商品下拉 + 回显当前推送状态
+  const lpSel = $('#lp_productId');
+  const enabledProducts = promoProductsCache.filter((pr) => pr.enabled);
+  lpSel.innerHTML = enabledProducts.map((pr) => `<option value="${esc(pr.id)}">${esc(pr.title)}</option>`).join('')
+    || '<option value="">（请先在「商品」里新增并启用商品）</option>';
+  refreshLiveStatus();
+}
+
+async function refreshLiveStatus() {
+  try {
+    const { productId } = await req('GET', '/api/admin/promos/live?room=' + currentRoomId);
+    const cur = productId ? promoProductsCache.find((p) => p.id === productId) : null;
+    const el = $('#lpStatus');
+    if (cur) { el.textContent = '正在推送：' + cur.title; el.classList.add('on'); }
+    else { el.textContent = '未推送'; el.classList.remove('on'); }
+  } catch (e) { /* 忽略 */ }
+}
+$('#lpPushBtn').onclick = async () => {
+  const productId = $('#lp_productId').value;
+  if (!productId) { toast('请先选择商品'); return; }
+  await req('POST', '/api/admin/promos/live', { roomId: currentRoomId, productId });
+  toast('已推送到直播间'); refreshLiveStatus();
+};
+$('#lpClearBtn').onclick = async () => {
+  await req('POST', '/api/admin/promos/live/clear', { roomId: currentRoomId });
+  toast('已收起'); refreshLiveStatus();
+};
+
+function openPromoModal(p) {
+  editingPromoId = p ? p.id : null;
+  $('#promoModalTitle').textContent = p ? '编辑促销弹窗' : '新增促销弹窗';
+  const sel = $('#pm_productId');
+  if (!promoProductsCache.length) { toast('请先在「商品」里新增商品'); }
+  sel.innerHTML = promoProductsCache.map((pr) => `<option value="${esc(pr.id)}">${esc(pr.title)}</option>`).join('');
+  $('#pm_productId').value = p ? p.productId : (promoProductsCache[0] && promoProductsCache[0].id) || '';
+  $('#pm_time').value = p ? p.time : 0;
+  $('#pm_durationSec').value = p ? p.durationSec : 20;
+  $('#pm_enabled').checked = p ? p.enabled : true;
+  $('#promoModal').hidden = false;
+}
+$('#addPromoBtn').onclick = () => openPromoModal(null);
+$('#promoCancel').onclick = () => { $('#promoModal').hidden = true; };
+$('#promoSave').onclick = async () => {
+  const body = {
+    productId: $('#pm_productId').value,
+    time: $('#pm_time').value, durationSec: $('#pm_durationSec').value,
+    enabled: $('#pm_enabled').checked
+  };
+  if (!body.productId) { toast('请选择关联商品'); return; }
+  if (editingPromoId) await req('PUT', '/api/admin/promos/' + editingPromoId, body);
+  else await req('POST', '/api/admin/promos', { ...body, roomId: currentRoomId });
+  $('#promoModal').hidden = true; toast('已保存'); loadPromos();
+};
+
+/* ============================ 订单 ============================ */
+async function loadOrders() {
+  roomCurrency = $('#r_currency').value || 'usd';
+  const list = await req('GET', '/api/admin/orders?room=' + currentRoomId);
+  const tbody = $('#orderRows');
+  tbody.innerHTML = '';
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:#8990a6">暂无订单</td></tr>'; return; }
+  const STATUS = { paid: '<span class="tag visible">已支付</span>', pending: '<span class="tag like">待支付</span>', failed: '<span class="tag hidden">失败</span>' };
+  for (const o of list) {
+    const tr = document.createElement('tr');
+    const cur = (CUR_SYM[o.currency] || (String(o.currency).toUpperCase() + ' '));
+    tr.innerHTML = `
+      <td style="white-space:nowrap">${fmtTime(o.createdAt)}</td>
+      <td><div class="cell-content">${esc(o.productTitle)}</div></td>
+      <td>${esc(cur + o.amount)}</td>
+      <td>${o.discount ? esc('-' + cur + o.discount) : '—'}</td>
+      <td>${esc((o.buyer && o.buyer.nickname) || '—')}${o.buyer && o.buyer.region ? ' <span class="tag">' + esc(o.buyer.region) + '</span>' : ''}</td>
+      <td>${esc((o.buyer && o.buyer.email) || '—')}</td>
+      <td>${STATUS[o.status] || o.status}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+$('#refreshOrdersBtn').onclick = () => loadOrders();
 
 /* ============================ 启动 ============================ */
 (async function boot() {

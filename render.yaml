@@ -16,6 +16,13 @@ services:
         value: /var/data     # 数据写到持久磁盘
       - key: ADMIN_PASSWORD
         sync: false          # 在 Render 面板里手动填，不写进仓库
+      # Stripe（商城支付）：三个都在 Render 面板手填，不进仓库。不配则商城可浏览但无法下单。
+      - key: STRIPE_SECRET_KEY
+        sync: false          # sk_test_... / sk_live_...
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false          # pk_test_... / pk_live_...（公开，会下发前端）
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false          # whsec_...（在 Stripe 后台为本服务的 webhook endpoint 生成）
     disk:
       name: zhibo-data
       mountPath: /var/data   # 持久磁盘挂载点，需与 DATA_DIR 一致

@@ -9,8 +9,38 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
+// Stripe：配了密钥才初始化；没配时支付相关接口返回 503，其余功能照常
+const stripe = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
+const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+
 // 部署在反向代理 / 一键平台后面：信任代理，才能正确拿到 HTTPS 和真实 IP
 app.set('trust proxy', 1);
+
+// ⚠️ Stripe webhook 必须拿「原始 body」做签名校验，所以这条路由要在全局 express.json() 之前、
+// 用 express.raw 单独注册，否则 body 会被 JSON 解析掉、验签失败。
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) return res.status(503).end();
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+  if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+    const session = event.data.object;
+    const orderId = session.metadata && session.metadata.orderId;
+    const order = orderId ? (db().orders || []).find((o) => o.id === orderId) : null;
+    if (order && order.status !== 'paid') {
+      order.status = 'paid';
+      order.stripePaymentIntent = session.payment_intent || '';
+      order.buyer.email = (session.customer_details && session.customer_details.email) || order.buyer.email || '';
+      order.paidAt = Date.now();
+      save();
+    }
+  }
+  res.json({ received: true });
+});
 
 app.use(express.json({ limit: '256kb' }));
 app.use(cookieParser());
@@ -32,6 +62,9 @@ function filterSensitive(text) {
   }
   return { text: out, hit };
 }
+
+// 手动推送弹窗：内存存「每个房间当前正在推的商品」。不落盘——直播中临时上链接，重启清空即可。
+const livePromos = new Map(); // roomId -> { productId, at }
 
 // 限频：按 clientId + IP 记录最近提交时间与每分钟计数（内存）
 const rateMap = new Map(); // key -> { last: ts, windowStart: ts, count: n }
@@ -117,6 +150,9 @@ app.get('/api/room', (req, res) => {
     cover: r.cover,
     liveStartAt: r.liveStartAt,
     requireAccessCode: !!r.requireAccessCode,
+    shopEnabled: !!r.shopEnabled,
+    shopName: r.shopName || r.name || '',
+    currency: r.currency || 'usd',
     serverNow: Date.now()
   });
 });
@@ -134,6 +170,112 @@ app.get('/api/presets', (req, res) => {
   res.json(list);
 });
 
+/* ----------------------------- 前台：商城（商品 / 优惠券 / 定时弹窗 / 结账） ----------------------------- */
+
+// 商城数据：只下发该房间「启用」的商品和（未过期的）优惠券 + 公开的 publishable key
+app.get('/api/shop', (req, res) => {
+  const r = getRoom(String(req.query.room || ''));
+  if (!r) return res.status(404).json({ error: '直播间不存在' });
+  const roomId = r.id;
+  const now = Date.now();
+  const products = (db().products || [])
+    .filter((p) => p.roomId === roomId && p.enabled)
+    .sort((a, b) => (a.sort || 0) - (b.sort || 0))
+    .map((p) => ({ id: p.id, title: p.title, image: p.image, price: p.price, originalPrice: p.originalPrice, desc: p.desc, payUrl: p.payUrl || '' }));
+  const coupons = (db().coupons || [])
+    .filter((c) => c.roomId === roomId && c.enabled && (!c.expireAt || c.expireAt > now))
+    .sort((a, b) => (a.sort || 0) - (b.sort || 0))
+    .map((c) => ({ id: c.id, title: c.title, threshold: c.threshold, amount: c.amount, expireAt: c.expireAt || null }));
+  res.json({
+    enabled: !!r.shopEnabled,
+    shopName: r.shopName || r.name || '',
+    currency: r.currency || 'usd',
+    stripeReady: !!stripe && !!STRIPE_PUBLISHABLE_KEY,
+    stripePublishableKey: STRIPE_PUBLISHABLE_KEY,
+    products, coupons
+  });
+});
+
+// 定时促销弹窗（启用项，结构对齐 /api/presets）
+app.get('/api/promos', (req, res) => {
+  const roomId = String(req.query.room || '');
+  const list = (db().promos || [])
+    .filter((p) => p.roomId === roomId && p.enabled)
+    .map((p) => ({ id: p.id, time: p.time, productId: p.productId, durationSec: p.durationSec }))
+    .sort((a, b) => a.time - b.time);
+  res.json(list);
+});
+
+// 结账：服务端算最终价（原价 − 校验通过的券额），建订单并创建 Stripe Embedded Checkout Session。
+app.post('/api/checkout', async (req, res) => {
+  const roomId = sanitizeText(req.body.roomId, 20);
+  const room = getRoom(roomId);
+  if (!room) return res.status(404).json({ error: '直播间不存在' });
+  if (!room.shopEnabled) return res.status(403).json({ error: '本直播间未开启商城' });
+  if (!stripe || !STRIPE_PUBLISHABLE_KEY) return res.status(503).json({ error: '支付未配置，请联系管理员' });
+
+  const product = (db().products || []).find((p) => p.id === req.body.productId && p.roomId === roomId && p.enabled);
+  if (!product) return res.status(404).json({ error: '商品不存在或已下架' });
+
+  // 优惠券：可选；只有满足门槛才抵扣，否则忽略（绝不信任前端金额）
+  let discount = 0;
+  let coupon = null;
+  if (req.body.couponId) {
+    const now = Date.now();
+    const c = (db().coupons || []).find((x) => x.id === req.body.couponId && x.roomId === roomId && x.enabled && (!x.expireAt || x.expireAt > now));
+    if (c && Number(product.price) >= Number(c.threshold)) { coupon = c; discount = Number(c.amount) || 0; }
+  }
+  const currency = room.currency || 'usd';
+  const final = Math.max(0, Number(product.price) - discount);
+  const unitAmount = Math.round(final * 100); // 转最小货币单位
+  if (unitAmount < 1) return res.status(400).json({ error: '订单金额无效' });
+
+  const order = {
+    id: genId('o'),
+    roomId, productId: product.id, productTitle: product.title,
+    currency, amount: final, discount, couponId: coupon ? coupon.id : null,
+    status: 'pending', stripeSessionId: '', stripePaymentIntent: '',
+    buyer: {
+      nickname: sanitizeText(req.body.nickname, 20),
+      region: sanitizeText(req.body.region, 20),
+      clientId: sanitizeText(req.body.clientId, 40),
+      email: ''
+    },
+    createdAt: Date.now(), paidAt: null
+  };
+
+  const origin = `${req.protocol}://${req.get('host')}`;
+  try {
+    const session = await stripe.checkout.sessions.create({
+      ui_mode: 'embedded',
+      mode: 'payment',
+      line_items: [{
+        price_data: {
+          currency,
+          product_data: { name: product.title, images: product.image ? [product.image] : [] },
+          unit_amount: unitAmount
+        },
+        quantity: 1
+      }],
+      return_url: `${origin}/r/${roomId}?paid=1&order=${order.id}&session_id={CHECKOUT_SESSION_ID}`,
+      metadata: { orderId: order.id, roomId }
+    });
+    order.stripeSessionId = session.id;
+    (db().orders || (db().orders = [])).push(order);
+    save();
+    res.json({ clientSecret: session.client_secret, orderId: order.id });
+  } catch (e) {
+    res.status(502).json({ error: '创建支付会话失败：' + (e.message || '未知错误') });
+  }
+});
+
+// 订单状态（前端付款返回后轮询确认）
+app.get('/api/order-status', (req, res) => {
+  const o = (db().orders || []).find((x) => x.id === String(req.query.id || ''));
+  if (!o) return res.status(404).json({ error: '订单不存在' });
+  res.json({ status: o.status, amount: o.amount, currency: o.currency, productTitle: o.productTitle });
+});
+
 // 可见用户评论（增量：since 为毫秒时间戳）
 app.get('/api/comments', (req, res) => {
   const roomId = String(req.query.room || '');
@@ -145,7 +287,9 @@ app.get('/api/comments', (req, res) => {
       content: c.content, createdAt: c.createdAt, mine: false
     }))
     .sort((a, b) => a.createdAt - b.createdAt);
-  res.json({ comments: list, serverNow: Date.now() });
+  // 搭车下发「当前手动推送的弹窗」：前端比对变化决定弹/收
+  const lp = livePromos.get(roomId);
+  res.json({ comments: list, serverNow: Date.now(), livePromo: lp ? { productId: lp.productId, at: lp.at } : null });
 });
 
 // 提交评论
@@ -281,9 +425,13 @@ function defaultRoom() {
     status: 'pre', viewerBase: 100,
     videoType: 'voomly', videoEmbed: '', hlsUrl: '', // voomly=老版嵌入；hls=新版 Cloudflare 自建播放器
     orientation: 'portrait',
-    cover: '', liveStartAt: null, requireAccessCode: false
+    cover: '', liveStartAt: null, requireAccessCode: false,
+    shopEnabled: false, shopName: '', currency: 'usd'
   };
 }
+
+// 允许的收款货币（Stripe，小写）。都按「×100 转最小单位」处理，故只放 2 位小数货币。
+const CURRENCIES = ['usd', 'sgd', 'myr', 'hkd', 'aud', 'eur', 'gbp', 'cny'];
 
 function applyRoomFields(r, b) {
   if (b.name !== undefined) r.name = sanitizeText(b.name, 50);
@@ -299,6 +447,9 @@ function applyRoomFields(r, b) {
   if (b.cover !== undefined) r.cover = sanitizeText(b.cover, 500);
   if (b.liveStartAt !== undefined) r.liveStartAt = b.liveStartAt ? Number(b.liveStartAt) : null;
   if (b.requireAccessCode !== undefined) r.requireAccessCode = !!b.requireAccessCode;
+  if (b.shopEnabled !== undefined) r.shopEnabled = !!b.shopEnabled;
+  if (b.shopName !== undefined) r.shopName = sanitizeText(b.shopName, 50);
+  if (b.currency !== undefined && CURRENCIES.includes(String(b.currency).toLowerCase())) r.currency = String(b.currency).toLowerCase();
 }
 
 // 直播间列表（带统计）
@@ -350,6 +501,10 @@ app.delete('/api/admin/rooms/:id', requireAdmin, (req, res) => {
   d.comments = d.comments.filter((c) => c.roomId !== id);
   d.accessCodes = d.accessCodes.filter((c) => c.roomId !== id);
   d.viewerSessions = (d.viewerSessions || []).filter((s) => s.roomId !== id);
+  d.products = (d.products || []).filter((p) => p.roomId !== id);
+  d.coupons = (d.coupons || []).filter((c) => c.roomId !== id);
+  d.promos = (d.promos || []).filter((p) => p.roomId !== id);
+  d.orders = (d.orders || []).filter((o) => o.roomId !== id);
   save();
   res.json({ ok: true });
 });
@@ -628,6 +783,177 @@ app.post('/api/admin/codes/import', requireAdmin, (req, res) => {
   }
   save();
   res.json({ ok: true, added, total: d.accessCodes.filter((c) => c.roomId === roomId).length });
+});
+
+/* ----------------------------- 后台：商品 ----------------------------- */
+
+// 只接受 http/https 链接，挡掉 javascript: 等危险协议（防前台点击时 XSS）
+function safeUrl(s) {
+  const u = sanitizeText(s, 1000);
+  return /^https?:\/\//i.test(u) ? u : '';
+}
+
+function normalizeProduct(b) {
+  return {
+    title: sanitizeText(b.title, 100),
+    image: sanitizeText(b.image, 500),
+    price: Math.max(0, Number(b.price) || 0),
+    originalPrice: Math.max(0, Number(b.originalPrice) || 0),
+    desc: sanitizeText(b.desc, 500),
+    payUrl: safeUrl(b.payUrl),
+    enabled: b.enabled === undefined ? true : !!b.enabled,
+    sort: parseInt(b.sort, 10) || 0
+  };
+}
+
+app.get('/api/admin/products', requireAdmin, (req, res) => {
+  const roomId = String(req.query.room || '');
+  res.json((db().products || []).filter((p) => p.roomId === roomId).sort((a, b) => (a.sort || 0) - (b.sort || 0)));
+});
+
+app.post('/api/admin/products', requireAdmin, (req, res) => {
+  const roomId = sanitizeText(req.body.roomId, 20);
+  if (!getRoom(roomId)) return res.status(404).json({ error: '直播间不存在' });
+  const p = { id: genId('prod'), roomId, ...normalizeProduct(req.body || {}), createdAt: Date.now() };
+  (db().products || (db().products = [])).push(p);
+  save();
+  res.json(p);
+});
+
+app.put('/api/admin/products/:id', requireAdmin, (req, res) => {
+  const p = (db().products || []).find((x) => x.id === req.params.id);
+  if (!p) return res.status(404).json({ error: '商品不存在' });
+  Object.assign(p, normalizeProduct({ ...p, ...req.body }));
+  save();
+  res.json(p);
+});
+
+app.delete('/api/admin/products/:id', requireAdmin, (req, res) => {
+  const d = db();
+  const i = (d.products || []).findIndex((x) => x.id === req.params.id);
+  if (i === -1) return res.status(404).json({ error: '商品不存在' });
+  d.products.splice(i, 1);
+  save();
+  res.json({ ok: true });
+});
+
+/* ----------------------------- 后台：优惠券（满减） ----------------------------- */
+
+function normalizeCoupon(b) {
+  return {
+    title: sanitizeText(b.title, 50),
+    threshold: Math.max(0, Number(b.threshold) || 0),
+    amount: Math.max(0, Number(b.amount) || 0),
+    enabled: b.enabled === undefined ? true : !!b.enabled,
+    sort: parseInt(b.sort, 10) || 0,
+    expireAt: b.expireAt ? Number(b.expireAt) : null
+  };
+}
+
+app.get('/api/admin/coupons', requireAdmin, (req, res) => {
+  const roomId = String(req.query.room || '');
+  res.json((db().coupons || []).filter((c) => c.roomId === roomId).sort((a, b) => (a.sort || 0) - (b.sort || 0)));
+});
+
+app.post('/api/admin/coupons', requireAdmin, (req, res) => {
+  const roomId = sanitizeText(req.body.roomId, 20);
+  if (!getRoom(roomId)) return res.status(404).json({ error: '直播间不存在' });
+  const c = { id: genId('coup'), roomId, ...normalizeCoupon(req.body || {}), createdAt: Date.now() };
+  (db().coupons || (db().coupons = [])).push(c);
+  save();
+  res.json(c);
+});
+
+app.put('/api/admin/coupons/:id', requireAdmin, (req, res) => {
+  const c = (db().coupons || []).find((x) => x.id === req.params.id);
+  if (!c) return res.status(404).json({ error: '优惠券不存在' });
+  Object.assign(c, normalizeCoupon({ ...c, ...req.body }));
+  save();
+  res.json(c);
+});
+
+app.delete('/api/admin/coupons/:id', requireAdmin, (req, res) => {
+  const d = db();
+  const i = (d.coupons || []).findIndex((x) => x.id === req.params.id);
+  if (i === -1) return res.status(404).json({ error: '优惠券不存在' });
+  d.coupons.splice(i, 1);
+  save();
+  res.json({ ok: true });
+});
+
+/* ----------------------------- 后台：定时促销弹窗 ----------------------------- */
+
+function normalizePromo(b) {
+  return {
+    time: Math.max(0, parseInt(b.time, 10) || 0),
+    productId: sanitizeText(b.productId, 40),
+    durationSec: Math.max(0, parseInt(b.durationSec, 10) || 0),
+    enabled: b.enabled === undefined ? true : !!b.enabled
+  };
+}
+
+app.get('/api/admin/promos', requireAdmin, (req, res) => {
+  const roomId = String(req.query.room || '');
+  res.json((db().promos || []).filter((p) => p.roomId === roomId).sort((a, b) => a.time - b.time));
+});
+
+app.post('/api/admin/promos', requireAdmin, (req, res) => {
+  const roomId = sanitizeText(req.body.roomId, 20);
+  if (!getRoom(roomId)) return res.status(404).json({ error: '直播间不存在' });
+  const p = { id: genId('promo'), roomId, ...normalizePromo(req.body || {}) };
+  (db().promos || (db().promos = [])).push(p);
+  save();
+  res.json(p);
+});
+
+app.put('/api/admin/promos/:id', requireAdmin, (req, res) => {
+  const p = (db().promos || []).find((x) => x.id === req.params.id);
+  if (!p) return res.status(404).json({ error: '促销弹窗不存在' });
+  Object.assign(p, normalizePromo({ ...p, ...req.body }));
+  save();
+  res.json(p);
+});
+
+app.delete('/api/admin/promos/:id', requireAdmin, (req, res) => {
+  const d = db();
+  const i = (d.promos || []).findIndex((x) => x.id === req.params.id);
+  if (i === -1) return res.status(404).json({ error: '促销弹窗不存在' });
+  d.promos.splice(i, 1);
+  save();
+  res.json({ ok: true });
+});
+
+/* ----------------------------- 后台：手动推送弹窗（直播中临时上链接） ----------------------------- */
+
+// 推送：把某商品弹到前台（覆盖该房间之前的推送）。状态存内存，不落盘。
+app.post('/api/admin/promos/live', requireAdmin, (req, res) => {
+  const roomId = sanitizeText(req.body.roomId, 20);
+  if (!getRoom(roomId)) return res.status(404).json({ error: '直播间不存在' });
+  const product = (db().products || []).find((p) => p.id === req.body.productId && p.roomId === roomId && p.enabled);
+  if (!product) return res.status(404).json({ error: '商品不存在或未启用' });
+  livePromos.set(roomId, { productId: product.id, at: Date.now() });
+  res.json({ ok: true, productId: product.id });
+});
+
+// 收起：撤下该房间当前推送
+app.post('/api/admin/promos/live/clear', requireAdmin, (req, res) => {
+  const roomId = sanitizeText(req.body.roomId, 20);
+  livePromos.delete(roomId);
+  res.json({ ok: true });
+});
+
+// 查当前推送（后台进入页面时回显状态）
+app.get('/api/admin/promos/live', requireAdmin, (req, res) => {
+  const roomId = String(req.query.room || '');
+  const lp = livePromos.get(roomId);
+  res.json({ productId: lp ? lp.productId : null });
+});
+
+/* ----------------------------- 后台：订单（只读） ----------------------------- */
+
+app.get('/api/admin/orders', requireAdmin, (req, res) => {
+  const roomId = String(req.query.room || '');
+  res.json((db().orders || []).filter((o) => o.roomId === roomId).sort((a, b) => b.createdAt - a.createdAt));
 });
 
 /* ----------------------------- 直播间页面路由 ----------------------------- */
