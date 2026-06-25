@@ -429,7 +429,7 @@ function defaultRoom() {
 }
 
 // 允许的收款货币（Stripe，小写）。都按「×100 转最小单位」处理，故只放 2 位小数货币。
-const CURRENCIES = ['usd', 'sgd', 'myr', 'hkd', 'aud', 'eur', 'gbp', 'cny'];
+const CURRENCIES = ['usd', 'sgd', 'myr', 'hkd', 'aud', 'eur', 'gbp', 'cny', 'twd'];
 
 function applyRoomFields(r, b) {
   if (b.name !== undefined) r.name = sanitizeText(b.name, 50);

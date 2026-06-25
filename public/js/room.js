@@ -907,7 +907,7 @@ function rememberOrder(id) {
   if (!ids.includes(id)) { ids.unshift(id); localStorage.setItem(ORDERS_KEY, JSON.stringify(ids.slice(0, 30))); }
 }
 
-const CURRENCY_SYMBOL = { usd: 'US$', sgd: 'S$', myr: 'RM', hkd: 'HK$', aud: 'A$', eur: '€', gbp: '£', cny: '¥' };
+const CURRENCY_SYMBOL = { usd: 'US$', sgd: 'S$', myr: 'RM', hkd: 'HK$', aud: 'A$', eur: '€', gbp: '£', cny: '¥', twd: 'NT$' };
 // 币种现在挂在单个商品上：传入商品 currency 即可；不传则回退默认（shop.currency，默认 usd）
 function curSym(cur) { const c = (cur || shop.currency || 'usd').toLowerCase(); return CURRENCY_SYMBOL[c] || (c.toUpperCase() + ' '); }
 function fmtMoney(n, cur) {

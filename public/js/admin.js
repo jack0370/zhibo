@@ -501,7 +501,7 @@ $('#codeImportDo').onclick = async () => {
 
 /* ============================ 商品 ============================ */
 let editingProductId = null;
-const CUR_SYM = { usd: 'US$', sgd: 'S$', myr: 'RM', hkd: 'HK$', aud: 'A$', eur: '€', gbp: '£', cny: '¥' };
+const CUR_SYM = { usd: 'US$', sgd: 'S$', myr: 'RM', hkd: 'HK$', aud: 'A$', eur: '€', gbp: '£', cny: '¥', twd: 'NT$' };
 // 币种现在挂在单个商品上；传入商品的 currency 来格式化，缺省回退 usd
 function money(n, cur) { const c = (cur || 'usd').toLowerCase(); return (CUR_SYM[c] || (c.toUpperCase() + ' ')) + (Number(n) || 0); }
 
