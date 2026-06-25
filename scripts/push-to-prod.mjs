@@ -41,7 +41,8 @@ for (const room of rooms) {
     videoEmbed: room.videoEmbed, hlsUrl: room.hlsUrl || '',
     orientation: room.orientation,
     cover: room.cover, requireAccessCode: room.requireAccessCode,
-    shopEnabled: room.shopEnabled, shopName: room.shopName
+    shopEnabled: room.shopEnabled, shopName: room.shopName,
+    replayWhatsappUrl: room.replayWhatsappUrl
   });
 
   const presets = db.presets.filter((p) => p.roomId === room.id)

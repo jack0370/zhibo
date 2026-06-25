@@ -710,8 +710,7 @@ function showGate() {
 function proceed() {
   const room = state.room;
   if (room.status === 'ended') {
-    injectVideo();
-    startLiveFeed(); // 直接回放历史
+    showEndedScreen(); // 直播结束：展示「领取回放」页，不再重播录像
   } else if (room.status === 'live' && room.liveStartAt) {
     if (now() < room.liveStartAt) {
       showCountdown(); // 预约：到点前倒计时，到点自动开播
@@ -771,6 +770,27 @@ function startScheduledLive() {
   $('#statusBadge').textContent = '直播中';
   injectVideo();
   startLiveFeed();
+}
+
+// 直播结束：盖上「领取回放」结束页（不注入视频、不重播）。配了 WhatsApp 链接才显示按钮。
+function showEndedScreen() {
+  $('#statusBadge').textContent = '已结束';
+  renderTopbar();
+  const url = normalizeHttpUrl(state.room.replayWhatsappUrl);
+  const btn = $('#endedReplayBtn');
+  const note = $('#endedReplayNote');
+  if (url) {
+    btn.hidden = false;
+    note.hidden = false;
+    btn.onclick = () => window.open(url, '_blank', 'noopener');
+  } else {
+    btn.hidden = true;
+    note.hidden = true;
+  }
+  // 结束态不再聊天/送花：隐藏底部输入栏，避免遮罩盖不住它
+  const composer = document.querySelector('.composer');
+  if (composer) composer.hidden = true;
+  $('#endedMask').hidden = false;
 }
 
 // 链接无效 / 直播间不存在 → 用进入遮罩显示提示，不放行

@@ -109,6 +109,9 @@
           <label class="chk"><input id="r_requireAccessCode" type="checkbox"> 需要观看码才能进入（开启后没有有效观看码的人进不来，到「观看码」标签页管理）</label>
           <label class="chk"><input id="r_shopEnabled" type="checkbox"> 开启商城（显示购物车入口，到「商品/优惠券/促销弹窗」标签页配置）</label>
           <label>店铺名（商品弹窗头部）<input id="r_shopName" class="inp" maxlength="50" placeholder="留空则用直播间名称"></label>
+          <label>回放领取 WhatsApp 链接（直播结束页「领取直播回放」按钮跳转；留空则隐藏按钮）
+            <input id="r_replayWhatsappUrl" class="inp" maxlength="1000" placeholder="https://wa.me/8869xxxxxxx">
+          </label>
           <label>开播时间（设为未来=预约，到点观众自动开播；留空=未设）
             <input id="r_liveStartAt_input" class="inp" type="datetime-local">
           </label>

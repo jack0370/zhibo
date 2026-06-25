@@ -152,6 +152,7 @@ app.get('/api/room', (req, res) => {
     requireAccessCode: !!r.requireAccessCode,
     shopEnabled: !!r.shopEnabled,
     shopName: r.shopName || r.name || '',
+    replayWhatsappUrl: r.replayWhatsappUrl || '',
     serverNow: Date.now()
   });
 });
@@ -424,7 +425,7 @@ function defaultRoom() {
     videoType: 'voomly', videoEmbed: '', hlsUrl: '', // voomly=老版嵌入；hls=新版 Cloudflare 自建播放器
     orientation: 'portrait',
     cover: '', liveStartAt: null, requireAccessCode: false,
-    shopEnabled: false, shopName: ''
+    shopEnabled: false, shopName: '', replayWhatsappUrl: ''
   };
 }
 
@@ -447,6 +448,7 @@ function applyRoomFields(r, b) {
   if (b.requireAccessCode !== undefined) r.requireAccessCode = !!b.requireAccessCode;
   if (b.shopEnabled !== undefined) r.shopEnabled = !!b.shopEnabled;
   if (b.shopName !== undefined) r.shopName = sanitizeText(b.shopName, 50);
+  if (b.replayWhatsappUrl !== undefined) r.replayWhatsappUrl = safeUrl(b.replayWhatsappUrl);
 }
 
 // 直播间列表（带统计）

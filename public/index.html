@@ -82,6 +82,17 @@
           <button class="enter-btn" id="enterBtn">进入直播间</button>
         </div>
       </div>
+
+      <!-- 直播结束页：领取回放（status=ended 时显示，不再重播录像） -->
+      <div class="ended-mask" id="endedMask" hidden>
+        <div class="ended-card">
+          <div class="ended-title">本场直播已结束</div>
+          <div class="ended-sub">可领取本场直播回放</div>
+          <p class="ended-body">如果你刚才没有听完整，或想重新复习重点内容，可以添加课程老师领取回放入口。</p>
+          <button class="ended-btn" id="endedReplayBtn" hidden>领取直播回放</button>
+          <div class="ended-note" id="endedReplayNote" hidden>添加后由课程老师发送回放链接</div>
+        </div>
+      </div>
     </section>
 
     <!-- 底部评论输入 -->

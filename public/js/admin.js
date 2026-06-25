@@ -184,6 +184,7 @@ async function loadRoom() {
   $('#r_requireAccessCode').checked = !!r.requireAccessCode;
   $('#r_shopEnabled').checked = !!r.shopEnabled;
   $('#r_shopName').value = r.shopName || '';
+  $('#r_replayWhatsappUrl').value = r.replayWhatsappUrl || '';
   $('#r_liveStartAt_input').value = r.liveStartAt ? toLocalInput(r.liveStartAt) : '';
   // 只读提示：区分「已开播 / 已预约（未来时间）/ 未设」
   let lbl = '未开播';
@@ -222,6 +223,7 @@ $('#saveRoomBtn').onclick = async () => {
     requireAccessCode: $('#r_requireAccessCode').checked,
     shopEnabled: $('#r_shopEnabled').checked,
     shopName: $('#r_shopName').value,
+    replayWhatsappUrl: $('#r_replayWhatsappUrl').value,
     liveStartAt: $('#r_liveStartAt_input').value ? new Date($('#r_liveStartAt_input').value).getTime() : null
   });
   toast('配置已保存');
