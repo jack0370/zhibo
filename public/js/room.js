@@ -40,6 +40,11 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
+function normalizeHttpUrl(s) {
+  const v = String(s == null ? '' : s).trim();
+  if (!v || !/^https?:\/\//i.test(v)) return '';
+  try { return new URL(v).href; } catch (e) { return ''; }
+}
 
 /* ============================ 本地身份 ============================ */
 const ME = (() => {
@@ -948,10 +953,32 @@ function revealDuePromos() {
 }
 
 let promoHideTimer = null;
+function setProductImage(img, url) {
+  const clean = normalizeHttpUrl(url);
+  img.classList.remove('img-missing');
+  img.onerror = () => {
+    img.removeAttribute('src');
+    img.classList.add('img-missing');
+  };
+  if (clean) img.src = clean;
+  else img.onerror();
+}
+
+function bindShopImageFallback(root) {
+  root.querySelectorAll('[data-shop-img]').forEach((img) => {
+    img.onerror = () => {
+      const fb = document.createElement('div');
+      fb.className = 'pc-img img-missing';
+      img.replaceWith(fb);
+    };
+    if (img.complete && img.naturalWidth === 0) img.onerror();
+  });
+}
+
 function showPromoPop(promo) {
   const product = shop.products.find((x) => x.id === promo.productId);
   if (!product) return;
-  $('#promoThumb').src = product.image || '';
+  setProductImage($('#promoThumb'), product.image);
   $('#promoTitle').textContent = product.title;
   $('#promoPrice').textContent = fmtMoney(product.price);
   const pop = $('#promoPop');
@@ -1004,7 +1031,7 @@ function renderProducts() {
   if (!shop.products.length) { box.innerHTML = '<div class="shop-empty">暂无课程</div>'; return; }
   box.innerHTML = shop.products.map((p) => `
     <div class="product-card">
-      ${p.image ? `<img class="pc-img" src="${escapeHtml(p.image)}" alt="">` : '<div class="pc-img"></div>'}
+      ${normalizeHttpUrl(p.image) ? `<img class="pc-img" data-shop-img src="${escapeHtml(normalizeHttpUrl(p.image))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="pc-img img-missing"></div>'}
       <div class="pc-main">
         <div class="pc-title">${escapeHtml(p.title)}</div>
         ${p.desc ? `<div class="pc-desc">${escapeHtml(p.desc)}</div>` : ''}
@@ -1023,6 +1050,7 @@ function renderProducts() {
       if (product) goPay(product);
     });
   });
+  bindShopImageFallback(box);
 }
 
 function renderCoupons() {

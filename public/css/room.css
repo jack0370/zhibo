@@ -337,6 +337,7 @@ html, body {
   background: rgba(0,0,0,.7); color: #fff; font-size: 14px; line-height: 1; cursor: pointer;
 }
 .promo-thumb { flex: 0 0 auto; width: 46px; height: 46px; border-radius: 8px; object-fit: cover; background: #333; }
+.promo-thumb.img-missing { background: #444; }
 .promo-body { flex: 1 1 auto; min-width: 0; }
 .promo-title { font-size: 12px; color: #fff; line-height: 1.3; max-height: 31px; overflow: hidden; }
 .promo-price { margin-top: 3px; }
@@ -383,6 +384,11 @@ html, body {
 .product-list { display: flex; flex-direction: column; gap: 10px; }
 .product-card { display: flex; gap: 10px; background: #fff; border-radius: 12px; padding: 10px; }
 .product-card .pc-img { flex: 0 0 auto; width: 96px; height: 72px; border-radius: 8px; object-fit: cover; background: #eee; }
+.product-card .pc-img.img-missing {
+  display: flex; align-items: center; justify-content: center;
+  color: #aaa; font-size: 12px;
+}
+.product-card .pc-img.img-missing::after { content: "无图"; }
 .product-card .pc-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .product-card .pc-title { font-size: 14px; font-weight: 600; color: #222; line-height: 1.35; }
 .product-card .pc-desc { font-size: 11px; color: #999; margin-top: 2px; max-height: 30px; overflow: hidden; }

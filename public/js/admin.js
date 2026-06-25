@@ -18,6 +18,29 @@ function toast(msg) {
   clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2000);
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function normalizeHttpUrl(s) {
+  const v = String(s == null ? '' : s).trim();
+  if (!v || !/^https?:\/\//i.test(v)) return '';
+  try { return new URL(v).href; } catch (e) { return ''; }
+}
+function checkImageLoad(url, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!url) { resolve(true); return; }
+    const img = new Image();
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs || 8000);
+    img.referrerPolicy = 'no-referrer';
+    img.onload = () => finish(true);
+    img.onerror = () => finish(false);
+    img.src = url;
+  });
+}
 function fmtTime(ts) {
   const d = new Date(ts);
   const p = (n) => String(n).padStart(2, '0');
@@ -484,6 +507,69 @@ let roomCurrency = 'usd'; // 当前房间货币（loadRoom 时更新，用于展
 const CUR_SYM = { usd: 'US$', sgd: 'S$', myr: 'RM', hkd: 'HK$', aud: 'A$', eur: '€', gbp: '£', cny: '¥' };
 function money(n) { return (CUR_SYM[roomCurrency] || (roomCurrency.toUpperCase() + ' ')) + (Number(n) || 0); }
 
+function productImageCell(url) {
+  const clean = normalizeHttpUrl(url);
+  if (!clean) return '<span class="product-img-empty">无图</span>';
+  return `<img class="product-img-thumb" data-product-img src="${esc(clean)}" alt="" loading="lazy" referrerpolicy="no-referrer">`;
+}
+
+function bindProductImageFallback(root) {
+  root.querySelectorAll('[data-product-img]').forEach((img) => {
+    img.onerror = () => {
+      const fb = document.createElement('span');
+      fb.className = 'product-img-broken';
+      fb.textContent = '加载失败';
+      img.replaceWith(fb);
+    };
+    if (img.complete && img.naturalWidth === 0) img.onerror();
+  });
+}
+
+function ensureProductImagePreview() {
+  if ($('#pr_imagePreview')) return;
+  const box = document.createElement('div');
+  box.id = 'pr_imagePreview';
+  box.className = 'image-preview';
+  box.hidden = true;
+  $('#pr_image').insertAdjacentElement('afterend', box);
+  $('#pr_image').addEventListener('input', updateProductImagePreview);
+}
+
+function updateProductImagePreview() {
+  const box = $('#pr_imagePreview');
+  if (!box) return;
+  const raw = $('#pr_image').value.trim();
+  const clean = normalizeHttpUrl(raw);
+  box.innerHTML = '';
+  if (!raw) { box.hidden = true; return; }
+  box.hidden = false;
+  if (!clean) {
+    box.className = 'image-preview invalid';
+    box.textContent = '图片链接需要以 http:// 或 https:// 开头';
+    return;
+  }
+  box.className = 'image-preview checking';
+  box.textContent = '正在检查图片...';
+  const img = new Image();
+  img.referrerPolicy = 'no-referrer';
+  img.onload = () => {
+    if ($('#pr_image').value.trim() !== raw) return;
+    box.className = 'image-preview ok';
+    box.innerHTML = '';
+    img.alt = '';
+    box.appendChild(img);
+    const txt = document.createElement('span');
+    txt.textContent = '图片可以加载';
+    box.appendChild(txt);
+  };
+  img.onerror = () => {
+    if ($('#pr_image').value.trim() !== raw) return;
+    box.className = 'image-preview invalid';
+    box.textContent = '图片无法加载，请换一个能直接打开的图片链接';
+  };
+  img.src = clean;
+}
+
 async function loadProducts() {
   roomCurrency = $('#r_currency').value || 'usd';
   const list = await req('GET', '/api/admin/products?room=' + currentRoomId);
@@ -493,7 +579,7 @@ async function loadProducts() {
   for (const p of list) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${p.image ? `<img src="${esc(p.image)}" style="width:48px;height:36px;object-fit:cover;border-radius:4px">` : '—'}</td>
+      <td>${productImageCell(p.image)}</td>
       <td><div class="cell-content">${esc(p.title)}</div></td>
       <td>${esc(money(p.price))}</td>
       <td>${p.originalPrice ? esc(money(p.originalPrice)) : '—'}</td>
@@ -505,6 +591,7 @@ async function loadProducts() {
       </div></td>`;
     tbody.appendChild(tr);
   }
+  bindProductImageFallback(tbody);
   tbody.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => openProductModal(list.find((x) => x.id === b.dataset.edit)));
   tbody.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (!confirm('删除这个商品？')) return;
@@ -517,6 +604,7 @@ async function loadProducts() {
 }
 
 function openProductModal(p) {
+  ensureProductImagePreview();
   editingProductId = p ? p.id : null;
   $('#productModalTitle').textContent = p ? '编辑商品' : '新增商品';
   $('#pr_title').value = p ? p.title : '';
@@ -528,12 +616,21 @@ function openProductModal(p) {
   $('#pr_sort').value = p ? (p.sort || 0) : 0;
   $('#pr_enabled').checked = p ? p.enabled : true;
   $('#productModal').hidden = false;
+  updateProductImagePreview();
 }
 $('#addProductBtn').onclick = () => openProductModal(null);
 $('#productCancel').onclick = () => { $('#productModal').hidden = true; };
 $('#productSave').onclick = async () => {
+  const rawImage = $('#pr_image').value.trim();
+  const image = normalizeHttpUrl(rawImage);
+  if (rawImage && !image) { toast('图片链接需要以 http:// 或 https:// 开头'); return; }
+  if (image && !(await checkImageLoad(image))) {
+    toast('图片无法加载，请换一个能直接打开的图片链接');
+    updateProductImagePreview();
+    return;
+  }
   const body = {
-    title: $('#pr_title').value.trim(), image: $('#pr_image').value.trim(),
+    title: $('#pr_title').value.trim(), image,
     payUrl: $('#pr_payUrl').value.trim(),
     price: $('#pr_price').value, originalPrice: $('#pr_originalPrice').value,
     desc: $('#pr_desc').value, sort: $('#pr_sort').value, enabled: $('#pr_enabled').checked

@@ -788,15 +788,16 @@ app.post('/api/admin/codes/import', requireAdmin, (req, res) => {
 /* ----------------------------- 后台：商品 ----------------------------- */
 
 // 只接受 http/https 链接，挡掉 javascript: 等危险协议（防前台点击时 XSS）
-function safeUrl(s) {
-  const u = sanitizeText(s, 1000);
-  return /^https?:\/\//i.test(u) ? u : '';
+function safeUrl(s, max = 1000) {
+  const u = sanitizeText(s, max);
+  if (!/^https?:\/\//i.test(u)) return '';
+  try { return new URL(u).href; } catch (e) { return ''; }
 }
 
 function normalizeProduct(b) {
   return {
     title: sanitizeText(b.title, 100),
-    image: sanitizeText(b.image, 500),
+    image: safeUrl(b.image, 500),
     price: Math.max(0, Number(b.price) || 0),
     originalPrice: Math.max(0, Number(b.originalPrice) || 0),
     desc: sanitizeText(b.desc, 500),

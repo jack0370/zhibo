@@ -115,6 +115,23 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color:
 .mini.danger { background: #ffe9ee; color: var(--live); }
 .mini.ok { background: #e6f7ee; color: var(--ok); }
 .switch { cursor: pointer; }
+.product-img-thumb,
+.product-img-empty,
+.product-img-broken {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 48px; height: 36px; border-radius: 4px; object-fit: cover;
+  background: #f0f1f7; color: #8990a6; font-size: 11px;
+}
+.product-img-broken { background: #fff0f3; color: var(--live); }
+.image-preview {
+  display: flex; align-items: center; gap: 10px; min-height: 42px; margin-top: -6px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
+  color: #5a6072; font-size: 12px; background: #fbfbfe;
+}
+.image-preview img { width: 64px; height: 44px; border-radius: 6px; object-fit: cover; background: #eef0f5; }
+.image-preview.ok { border-color: #ccebd9; background: #f4fbf7; color: var(--ok); }
+.image-preview.invalid { border-color: #ffd5df; background: #fff5f8; color: var(--live); }
+.image-preview.checking { color: var(--muted); }
 /* 观看记录：在线人数徽标 */
 .online-badge { display: inline-block; margin-left: 8px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #e6f7ee; color: var(--ok); vertical-align: middle; }
 /* 预设批量删除：复选框列 */
