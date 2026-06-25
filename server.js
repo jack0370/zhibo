@@ -152,7 +152,6 @@ app.get('/api/room', (req, res) => {
     requireAccessCode: !!r.requireAccessCode,
     shopEnabled: !!r.shopEnabled,
     shopName: r.shopName || r.name || '',
-    currency: r.currency || 'usd',
     serverNow: Date.now()
   });
 });
@@ -181,7 +180,7 @@ app.get('/api/shop', (req, res) => {
   const products = (db().products || [])
     .filter((p) => p.roomId === roomId && p.enabled)
     .sort((a, b) => (a.sort || 0) - (b.sort || 0))
-    .map((p) => ({ id: p.id, title: p.title, image: p.image, price: p.price, originalPrice: p.originalPrice, desc: p.desc, payUrl: p.payUrl || '' }));
+    .map((p) => ({ id: p.id, title: p.title, image: p.image, currency: p.currency || 'usd', price: p.price, originalPrice: p.originalPrice, desc: p.desc, payUrl: p.payUrl || '' }));
   const coupons = (db().coupons || [])
     .filter((c) => c.roomId === roomId && c.enabled && (!c.expireAt || c.expireAt > now))
     .sort((a, b) => (a.sort || 0) - (b.sort || 0))
@@ -189,7 +188,6 @@ app.get('/api/shop', (req, res) => {
   res.json({
     enabled: !!r.shopEnabled,
     shopName: r.shopName || r.name || '',
-    currency: r.currency || 'usd',
     stripeReady: !!stripe && !!STRIPE_PUBLISHABLE_KEY,
     stripePublishableKey: STRIPE_PUBLISHABLE_KEY,
     products, coupons
@@ -225,7 +223,7 @@ app.post('/api/checkout', async (req, res) => {
     const c = (db().coupons || []).find((x) => x.id === req.body.couponId && x.roomId === roomId && x.enabled && (!x.expireAt || x.expireAt > now));
     if (c && Number(product.price) >= Number(c.threshold)) { coupon = c; discount = Number(c.amount) || 0; }
   }
-  const currency = room.currency || 'usd';
+  const currency = CURRENCIES.includes(String(product.currency).toLowerCase()) ? String(product.currency).toLowerCase() : 'usd';
   const final = Math.max(0, Number(product.price) - discount);
   const unitAmount = Math.round(final * 100); // 转最小货币单位
   if (unitAmount < 1) return res.status(400).json({ error: '订单金额无效' });
@@ -426,7 +424,7 @@ function defaultRoom() {
     videoType: 'voomly', videoEmbed: '', hlsUrl: '', // voomly=老版嵌入；hls=新版 Cloudflare 自建播放器
     orientation: 'portrait',
     cover: '', liveStartAt: null, requireAccessCode: false,
-    shopEnabled: false, shopName: '', currency: 'usd'
+    shopEnabled: false, shopName: ''
   };
 }
 
@@ -449,7 +447,6 @@ function applyRoomFields(r, b) {
   if (b.requireAccessCode !== undefined) r.requireAccessCode = !!b.requireAccessCode;
   if (b.shopEnabled !== undefined) r.shopEnabled = !!b.shopEnabled;
   if (b.shopName !== undefined) r.shopName = sanitizeText(b.shopName, 50);
-  if (b.currency !== undefined && CURRENCIES.includes(String(b.currency).toLowerCase())) r.currency = String(b.currency).toLowerCase();
 }
 
 // 直播间列表（带统计）
@@ -798,6 +795,7 @@ function normalizeProduct(b) {
   return {
     title: sanitizeText(b.title, 100),
     image: safeUrl(b.image, 500),
+    currency: CURRENCIES.includes(String(b.currency).toLowerCase()) ? String(b.currency).toLowerCase() : 'usd',
     price: Math.max(0, Number(b.price) || 0),
     originalPrice: Math.max(0, Number(b.originalPrice) || 0),
     desc: sanitizeText(b.desc, 500),

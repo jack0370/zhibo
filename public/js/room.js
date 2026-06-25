@@ -908,10 +908,11 @@ function rememberOrder(id) {
 }
 
 const CURRENCY_SYMBOL = { usd: 'US$', sgd: 'S$', myr: 'RM', hkd: 'HK$', aud: 'A$', eur: '€', gbp: '£', cny: '¥' };
-function curSym() { return CURRENCY_SYMBOL[shop.currency] || (shop.currency.toUpperCase() + ' '); }
-function fmtMoney(n) {
+// 币种现在挂在单个商品上：传入商品 currency 即可；不传则回退默认（shop.currency，默认 usd）
+function curSym(cur) { const c = (cur || shop.currency || 'usd').toLowerCase(); return CURRENCY_SYMBOL[c] || (c.toUpperCase() + ' '); }
+function fmtMoney(n, cur) {
   const v = Number(n) || 0;
-  return curSym() + (Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2));
+  return curSym(cur) + (Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2));
 }
 
 async function loadShop() {
@@ -980,7 +981,7 @@ function showPromoPop(promo) {
   if (!product) return;
   setProductImage($('#promoThumb'), product.image);
   $('#promoTitle').textContent = product.title;
-  $('#promoPrice').textContent = fmtMoney(product.price);
+  $('#promoPrice').textContent = fmtMoney(product.price, product.currency);
   const pop = $('#promoPop');
   pop.hidden = false;
   pop.dataset.productId = product.id;
@@ -1037,8 +1038,8 @@ function renderProducts() {
         ${p.desc ? `<div class="pc-desc">${escapeHtml(p.desc)}</div>` : ''}
         <div class="pc-bottom">
           <div>
-            <span class="pc-price">${escapeHtml(fmtMoney(p.price))}</span>
-            ${p.originalPrice > p.price ? `<span class="pc-orig">${escapeHtml(fmtMoney(p.originalPrice))}</span>` : ''}
+            <span class="pc-price">${escapeHtml(fmtMoney(p.price, p.currency))}</span>
+            ${p.originalPrice > p.price ? `<span class="pc-orig">${escapeHtml(fmtMoney(p.originalPrice, p.currency))}</span>` : ''}
           </div>
           <button class="pc-buy" data-id="${escapeHtml(p.id)}">马上抢</button>
         </div>
@@ -1082,7 +1083,7 @@ async function renderOrders() {
       cards.push(`<div class="order-card">
         <div class="oc-row"><span class="oc-title">${escapeHtml(o.productTitle || '课程')}</span>
           <span class="oc-status ${o.status}">${STATUS_TXT[o.status] || o.status}</span></div>
-        <div class="oc-row"><span>${escapeHtml(curSym() + (o.amount || 0))}</span></div>
+        <div class="oc-row"><span>${escapeHtml(curSym(o.currency) + (o.amount || 0))}</span></div>
       </div>`);
     } catch (e) { /* 单个订单查不到就跳过 */ }
   }
@@ -1110,9 +1111,9 @@ function renderCheckout() {
   const final = Math.max(0, Number(p.price) - discount);
 
   $('#checkoutSummary').innerHTML = `
-    <div class="cs-line"><span>${escapeHtml(p.title)}</span><span>${escapeHtml(fmtMoney(p.price))}</span></div>
-    ${discount ? `<div class="cs-line"><span>优惠券</span><span>-${escapeHtml(fmtMoney(discount))}</span></div>` : ''}
-    <div class="cs-line cs-total"><span>应付</span><span>${escapeHtml(fmtMoney(final))}</span></div>`;
+    <div class="cs-line"><span>${escapeHtml(p.title)}</span><span>${escapeHtml(fmtMoney(p.price, p.currency))}</span></div>
+    ${discount ? `<div class="cs-line"><span>优惠券</span><span>-${escapeHtml(fmtMoney(discount, p.currency))}</span></div>` : ''}
+    <div class="cs-line cs-total"><span>应付</span><span>${escapeHtml(fmtMoney(final, p.currency))}</span></div>`;
 
   const ck = $('#checkoutCoupons');
   if (coupons.length) {
@@ -1205,7 +1206,7 @@ function pollPaid(orderId, tries) {
   tries = tries || 0;
   if (!orderId || tries > 10) { $('#payDoneSub').textContent = '感谢购买，我们会尽快为你开通课程。'; return; }
   api.get('/api/order-status?id=' + encodeURIComponent(orderId)).then((o) => {
-    if (o.status === 'paid') { $('#payDoneSub').textContent = '已支付 ' + fmtMoney(o.amount) + '，感谢购买！'; }
+    if (o.status === 'paid') { $('#payDoneSub').textContent = '已支付 ' + fmtMoney(o.amount, o.currency) + '，感谢购买！'; }
     else setTimeout(() => pollPaid(orderId, tries + 1), 1500);
   }).catch(() => setTimeout(() => pollPaid(orderId, tries + 1), 1500));
 }

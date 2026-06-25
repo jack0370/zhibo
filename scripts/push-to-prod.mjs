@@ -41,7 +41,7 @@ for (const room of rooms) {
     videoEmbed: room.videoEmbed, hlsUrl: room.hlsUrl || '',
     orientation: room.orientation,
     cover: room.cover, requireAccessCode: room.requireAccessCode,
-    shopEnabled: room.shopEnabled, shopName: room.shopName, currency: room.currency
+    shopEnabled: room.shopEnabled, shopName: room.shopName
   });
 
   const presets = db.presets.filter((p) => p.roomId === room.id)
@@ -60,6 +60,7 @@ for (const room of rooms) {
   for (const p of products) {
     const created = await api('POST', '/api/admin/products', {
       roomId: id, title: p.title, image: p.image, price: p.price,
+      currency: p.currency, payUrl: p.payUrl,
       originalPrice: p.originalPrice, desc: p.desc, enabled: p.enabled, sort: p.sort
     });
     productIdMap[p.id] = created.id;

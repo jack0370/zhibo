@@ -184,7 +184,6 @@ async function loadRoom() {
   $('#r_requireAccessCode').checked = !!r.requireAccessCode;
   $('#r_shopEnabled').checked = !!r.shopEnabled;
   $('#r_shopName').value = r.shopName || '';
-  $('#r_currency').value = r.currency || 'usd';
   $('#r_liveStartAt_input').value = r.liveStartAt ? toLocalInput(r.liveStartAt) : '';
   // 只读提示：区分「已开播 / 已预约（未来时间）/ 未设」
   let lbl = '未开播';
@@ -223,7 +222,6 @@ $('#saveRoomBtn').onclick = async () => {
     requireAccessCode: $('#r_requireAccessCode').checked,
     shopEnabled: $('#r_shopEnabled').checked,
     shopName: $('#r_shopName').value,
-    currency: $('#r_currency').value,
     liveStartAt: $('#r_liveStartAt_input').value ? new Date($('#r_liveStartAt_input').value).getTime() : null
   });
   toast('配置已保存');
@@ -503,9 +501,9 @@ $('#codeImportDo').onclick = async () => {
 
 /* ============================ 商品 ============================ */
 let editingProductId = null;
-let roomCurrency = 'usd'; // 当前房间货币（loadRoom 时更新，用于展示）
 const CUR_SYM = { usd: 'US$', sgd: 'S$', myr: 'RM', hkd: 'HK$', aud: 'A$', eur: '€', gbp: '£', cny: '¥' };
-function money(n) { return (CUR_SYM[roomCurrency] || (roomCurrency.toUpperCase() + ' ')) + (Number(n) || 0); }
+// 币种现在挂在单个商品上；传入商品的 currency 来格式化，缺省回退 usd
+function money(n, cur) { const c = (cur || 'usd').toLowerCase(); return (CUR_SYM[c] || (c.toUpperCase() + ' ')) + (Number(n) || 0); }
 
 function productImageCell(url) {
   const clean = normalizeHttpUrl(url);
@@ -571,7 +569,6 @@ function updateProductImagePreview() {
 }
 
 async function loadProducts() {
-  roomCurrency = $('#r_currency').value || 'usd';
   const list = await req('GET', '/api/admin/products?room=' + currentRoomId);
   const tbody = $('#productRows');
   tbody.innerHTML = '';
@@ -581,8 +578,8 @@ async function loadProducts() {
     tr.innerHTML = `
       <td>${productImageCell(p.image)}</td>
       <td><div class="cell-content">${esc(p.title)}</div></td>
-      <td>${esc(money(p.price))}</td>
-      <td>${p.originalPrice ? esc(money(p.originalPrice)) : '—'}</td>
+      <td>${esc(money(p.price, p.currency))}</td>
+      <td>${p.originalPrice ? esc(money(p.originalPrice, p.currency)) : '—'}</td>
       <td>${p.sort || 0}</td>
       <td><span class="switch tag ${p.enabled ? 'visible' : 'hidden'}" data-id="${p.id}">${p.enabled ? '启用' : '停用'}</span></td>
       <td><div class="op">
@@ -612,6 +609,7 @@ function openProductModal(p) {
   $('#pr_payUrl').value = p ? (p.payUrl || '') : '';
   $('#pr_price').value = p ? p.price : '';
   $('#pr_originalPrice').value = p ? (p.originalPrice || '') : '';
+  $('#pr_currency').value = p ? (p.currency || 'usd') : 'usd';
   $('#pr_desc').value = p ? (p.desc || '') : '';
   $('#pr_sort').value = p ? (p.sort || 0) : 0;
   $('#pr_enabled').checked = p ? p.enabled : true;
@@ -633,6 +631,7 @@ $('#productSave').onclick = async () => {
     title: $('#pr_title').value.trim(), image,
     payUrl: $('#pr_payUrl').value.trim(),
     price: $('#pr_price').value, originalPrice: $('#pr_originalPrice').value,
+    currency: $('#pr_currency').value,
     desc: $('#pr_desc').value, sort: $('#pr_sort').value, enabled: $('#pr_enabled').checked
   };
   if (!body.title) { toast('请填写标题'); return; }
@@ -645,7 +644,6 @@ $('#productSave').onclick = async () => {
 let editingCouponId = null;
 
 async function loadCoupons() {
-  roomCurrency = $('#r_currency').value || 'usd';
   const list = await req('GET', '/api/admin/coupons?room=' + currentRoomId);
   const tbody = $('#couponRows');
   tbody.innerHTML = '';
@@ -794,7 +792,6 @@ $('#promoSave').onclick = async () => {
 
 /* ============================ 订单 ============================ */
 async function loadOrders() {
-  roomCurrency = $('#r_currency').value || 'usd';
   const list = await req('GET', '/api/admin/orders?room=' + currentRoomId);
   const tbody = $('#orderRows');
   tbody.innerHTML = '';

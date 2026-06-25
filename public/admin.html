@@ -108,21 +108,7 @@
           </label>
           <label class="chk"><input id="r_requireAccessCode" type="checkbox"> 需要观看码才能进入（开启后没有有效观看码的人进不来，到「观看码」标签页管理）</label>
           <label class="chk"><input id="r_shopEnabled" type="checkbox"> 开启商城（显示购物车入口，到「商品/优惠券/促销弹窗」标签页配置）</label>
-          <div class="row">
-            <label>店铺名（商品弹窗头部）<input id="r_shopName" class="inp" maxlength="50" placeholder="留空则用直播间名称"></label>
-            <label>收款货币（Stripe）
-              <select id="r_currency" class="inp">
-                <option value="usd">美元 USD</option>
-                <option value="sgd">新加坡元 SGD</option>
-                <option value="myr">马来西亚林吉特 MYR</option>
-                <option value="hkd">港币 HKD</option>
-                <option value="aud">澳元 AUD</option>
-                <option value="eur">欧元 EUR</option>
-                <option value="gbp">英镑 GBP</option>
-                <option value="cny">人民币 CNY</option>
-              </select>
-            </label>
-          </div>
+          <label>店铺名（商品弹窗头部）<input id="r_shopName" class="inp" maxlength="50" placeholder="留空则用直播间名称"></label>
           <label>开播时间（设为未来=预约，到点观众自动开播；留空=未设）
             <input id="r_liveStartAt_input" class="inp" type="datetime-local">
           </label>
@@ -404,6 +390,18 @@
       <div class="row">
         <label>现价<input id="pr_price" class="inp" type="number" min="0" step="0.01"></label>
         <label>原价（划线价，可选）<input id="pr_originalPrice" class="inp" type="number" min="0" step="0.01"></label>
+        <label>收款货币（Stripe）
+          <select id="pr_currency" class="inp">
+            <option value="usd">美元 USD</option>
+            <option value="sgd">新加坡元 SGD</option>
+            <option value="myr">马来西亚林吉特 MYR</option>
+            <option value="hkd">港币 HKD</option>
+            <option value="aud">澳元 AUD</option>
+            <option value="eur">欧元 EUR</option>
+            <option value="gbp">英镑 GBP</option>
+            <option value="cny">人民币 CNY</option>
+          </select>
+        </label>
       </div>
       <label>描述（可选）<textarea id="pr_desc" class="inp ta" rows="2" maxlength="500"></textarea></label>
       <div class="row">
