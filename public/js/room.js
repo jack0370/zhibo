@@ -207,7 +207,29 @@ async function pollComments() {
       revealDueComments();           // 之后：新评论到点即揭示（直播边缘=实时）
     }
     if ('livePromo' in data) handleLivePromo(data.livePromo); // 搭车：处理后台手动推送
+    if ('roomStatus' in data) handleRoomStatus(data.roomStatus); // 搭车：直播中→已结束 当场盖结束页
   } catch (e) { /* 忽略轮询错误 */ }
+}
+
+// 轮询发现房间状态转为 ended：当场盖上「领取回放」结束页，停掉播放与轮询，无需观众刷新
+function handleRoomStatus(status) {
+  if (status !== 'ended' || !state.room || state.room.status === 'ended') return;
+  state.room.status = 'ended';
+  teardownLive();        // 停播放器、心跳、评论/揭示轮询
+  showEndedScreen();     // 盖结束页（含「领取回放」按钮，若已配 WhatsApp）
+}
+
+// 直播转结束时收尾：停掉播放器与所有直播态定时器，避免视频继续循环重播
+function teardownLive() {
+  try { if (state.hls) { state.hls.destroy(); state.hls = null; } } catch (e) { /* 无妨 */ }
+  const v = state.hlsVideo;
+  if (v) { try { v.pause(); } catch (e) { /* 无妨 */ } }
+  // Voomly / iframe 嵌入：没有可控播放器句柄，直接清空容器停掉嵌入，避免继续循环播
+  const wrap = $('#videoWrap');
+  if (wrap && state.room.videoType !== 'hls') wrap.innerHTML = '';
+  for (const k of ['pollTimer', 'tickTimer', 'presenceTimer', 'viewerTimer', 'countdownTimer']) {
+    if (state[k]) { clearInterval(state[k]); state[k] = null; }
+  }
 }
 
 // 后台手动推送：按 at 时间戳判断是否「新一次推送」，是则弹；变 null 则收起
@@ -624,7 +646,7 @@ function startLiveFeed() {
   ensurePolling();
   if (!state.tickTimer) state.tickTimer = setInterval(() => { revealDuePresets(); revealDueComments(); revealDuePromos(); }, 1000);
   showCartFab(); // 进入直播间后，若开启商城则显示购物车入口
-  $('#feedHint').textContent = state.room.status === 'ended' ? '直播已结束 · 回放中' : '直播进行中';
+  $('#feedHint').textContent = state.room.status === 'ended' ? '直播已结束' : '直播进行中';
   // 直播中：进场即盖上透明拦截层，任何平台都点不动、无法暂停（像真直播）。回放(ended)不锁，方便拖进度。
   // 开声音不再依赖拦截层让路 —— 由我们自己的 #soundBtn(在 guard 之上) 调 api.unmute() 接管。
   if (state.room.status !== 'ended') {

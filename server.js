@@ -288,7 +288,14 @@ app.get('/api/comments', (req, res) => {
     .sort((a, b) => a.createdAt - b.createdAt);
   // 搭车下发「当前手动推送的弹窗」：前端比对变化决定弹/收
   const lp = livePromos.get(roomId);
-  res.json({ comments: list, serverNow: Date.now(), livePromo: lp ? { productId: lp.productId, at: lp.at } : null });
+  // 搭车下发当前房间状态：前端在直播中轮询发现转 ended，当场盖结束页（无需观众刷新）
+  const r = getRoom(roomId);
+  res.json({
+    comments: list,
+    serverNow: Date.now(),
+    livePromo: lp ? { productId: lp.productId, at: lp.at } : null,
+    roomStatus: r ? r.status : null
+  });
 });
 
 // 提交评论
