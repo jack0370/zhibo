@@ -933,6 +933,7 @@ const shop = {
   stripeReady: false, pubKey: '',
   products: [], coupons: [],
   promos: [], shownPromoIds: new Set(),
+  shownProductIds: new Set(), // 已被弹窗弹出过的商品 id：只有弹过窗的商品才进橱窗
   livePromoAt: 0,         // 后台手动推送：最近一次推送的时间戳（去重用）
   pickedCouponId: null,   // 结账时选中的券
   currentProduct: null,   // 结账中的商品
@@ -1021,6 +1022,8 @@ function bindShopImageFallback(root) {
 function showPromoPop(promo) {
   const product = shop.products.find((x) => x.id === promo.productId);
   if (!product) return;
+  shop.shownProductIds.add(product.id); // 弹过窗即“上架”到橱窗
+  if (!$('#shopMask').hidden) renderProducts(); // 橱窗正开着则实时刷新，把新商品补进去
   setProductImage($('#promoThumb'), product.image);
   $('#promoTitle').textContent = product.title;
   $('#promoPrice').textContent = fmtMoney(product.price, product.currency);
@@ -1071,8 +1074,10 @@ function goPay(product) {
 
 function renderProducts() {
   const box = $('#productList');
-  if (!shop.products.length) { box.innerHTML = '<div class="shop-empty">暂无课程</div>'; return; }
-  box.innerHTML = shop.products.map((p) => `
+  // 只展示已被弹窗弹出过的商品：没触发弹窗的上架商品不进橱窗
+  const list = shop.products.filter((p) => shop.shownProductIds.has(p.id));
+  if (!list.length) { box.innerHTML = '<div class="shop-empty">暂无课程</div>'; return; }
+  box.innerHTML = list.map((p) => `
     <div class="product-card">
       ${normalizeHttpUrl(p.image) ? `<img class="pc-img" data-shop-img src="${escapeHtml(normalizeHttpUrl(p.image))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="pc-img img-missing"></div>'}
       <div class="pc-main">
