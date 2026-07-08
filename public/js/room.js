@@ -248,15 +248,47 @@ function handleLivePromo(lp) {
 }
 
 /* ============================ 观看人数浮动 ============================ */
+// 观看人数形态：贴合真实直播间——开播前候场偏少，开播后快速涌入冲顶，
+// 之后随直播时长逐步流失（播得越久在线越低）。返回相对「基数」的倍数（约 0.3~1.05）。
+// 若后台填了「直播总时长」(totalMin)，则临近结束再额外收尾，避免结尾还很高。
+function viewerShapeFrac(elapsedMin, totalMin) {
+  if (elapsedMin <= 0) return 0.45;             // 候场：约基数的 45%
+  let frac;
+  const RAMP_MIN = 4;                            // 前 4 分钟快速涌入
+  if (elapsedMin < RAMP_MIN) {
+    const p = elapsedMin / RAMP_MIN;             // 0 → 1
+    const ease = 1 - (1 - p) * (1 - p);          // ease-out：先快后缓
+    frac = 0.55 + 0.50 * ease;                   // 0.55 → 1.05（轻微冲顶）
+  } else {
+    // 冲顶后长尾流失：半衰期约 45 分钟，最低维持约基数的 30%（总有铁粉留守）
+    frac = Math.max(0.30, 1.02 * Math.pow(0.5, (elapsedMin - RAMP_MIN) / 45));
+  }
+  // 结尾收尾：最后 15% 时长（至少 3 分钟）内线性收到约 25%，越接近散场越低。
+  if (totalMin > 0) {
+    const tailMin = Math.max(3, totalMin * 0.15);
+    const intoTail = elapsedMin - (totalMin - tailMin);
+    if (intoTail > 0) {
+      const p = Math.min(1, intoTail / tailMin);
+      frac *= (1 - 0.75 * p);                     // → 收到约当前值的 25%
+    }
+  }
+  return frac;
+}
+
 function startViewers() {
   const base = state.room.viewerBase || 0;
-  state.displayViewers = base;
+  const totalMin = state.room.liveDurationMin || 0;
+  const targetNow = () => base * viewerShapeFrac(elapsedSec() / 60, totalMin);
+  state.displayViewers = Math.round(targetNow());
   const render = () => { $('#viewerCount').textContent = state.displayViewers.toLocaleString(); };
   render();
   state.viewerTimer = setInterval(() => {
-    if (state.room.status === 'ended') return;
-    const drift = Math.round((Math.random() - 0.45) * 4); // 轻微上浮
-    state.displayViewers = Math.max(0, state.displayViewers + drift);
+    if (state.room.status === 'ended') return;   // 结束后定格
+    const target = targetNow();
+    // 均值回归靠拢目标 + 轻微随机噪声 → 有真实起伏但不乱跳、不会一路走高
+    const gap = target - state.displayViewers;
+    const noise = (Math.random() - 0.5) * Math.max(2, base * 0.02);
+    state.displayViewers = Math.max(0, Math.round(state.displayViewers + gap * 0.15 + noise));
     render();
   }, 3000);
 }
@@ -478,9 +510,16 @@ function injectHlsPlayer(url) {
       hls.on(window.Hls.Events.MANIFEST_PARSED, onReady);
     });
   }
-  // 防暂停兜底：仅「已正式起播后」被暂停才续播，避免和预缓冲/缓冲互掐
+  // 防暂停兜底：仅「已正式起播后」被暂停才续播，避免和预缓冲/缓冲互掐。
+  // 关键：视频播到自然结尾也会触发 pause，此时 video.ended 为真——绝不能续播，
+  // 否则对已结束的视频调 play() 会从头重播 → 循环播放。
   video.addEventListener('pause', () => {
-    if (state.room.status !== 'ended' && state.hlsStarted) video.play().catch(() => {});
+    if (state.room.status !== 'ended' && state.hlsStarted && !video.ended) video.play().catch(() => {});
+  });
+  // 直播源播放到自然结尾：不循环重播，直接盖上「领取回放」结束页
+  video.addEventListener('ended', () => {
+    try { video.pause(); } catch (e) { /* 无妨 */ }
+    handleRoomStatus('ended');
   });
   // 静音状态变化 → 已解除静音则收起开声按钮
   video.addEventListener('volumechange', () => { if (!video.muted) hideSoundBtn(); });

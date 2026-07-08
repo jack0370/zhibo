@@ -175,6 +175,7 @@ async function loadRoom() {
   $('#r_bannerSubtitle').value = r.bannerSubtitle || '';
   $('#r_status').value = r.status || 'pre';
   $('#r_viewerBase').value = r.viewerBase || 0;
+  $('#r_liveDurationMin').value = r.liveDurationMin || 0;
   $('#r_cover').value = r.cover || '';
   $('#r_videoType').value = r.videoType || 'voomly';
   $('#r_videoEmbed').value = r.videoEmbed || '';
@@ -215,6 +216,7 @@ $('#saveRoomBtn').onclick = async () => {
     bannerSubtitle: $('#r_bannerSubtitle').value,
     status: $('#r_status').value,
     viewerBase: $('#r_viewerBase').value,
+    liveDurationMin: $('#r_liveDurationMin').value,
     cover: $('#r_cover').value,
     videoType: $('#r_videoType').value,
     videoEmbed: $('#r_videoEmbed').value,

@@ -143,6 +143,7 @@ app.get('/api/room', (req, res) => {
     bannerSubtitle: r.bannerSubtitle || '',
     status: r.status,
     viewerBase: r.viewerBase,
+    liveDurationMin: r.liveDurationMin || 0,
     videoType: r.videoType || 'voomly',
     videoEmbed: r.videoEmbed,
     hlsUrl: r.hlsUrl || '',
@@ -428,7 +429,7 @@ app.get('/api/admin/me', (req, res) => {
 function defaultRoom() {
   return {
     name: '新直播间', courseTitle: '', bannerTitle: '', bannerSubtitle: '',
-    status: 'pre', viewerBase: 100,
+    status: 'pre', viewerBase: 100, liveDurationMin: 0,
     videoType: 'voomly', videoEmbed: '', hlsUrl: '', // voomly=老版嵌入；hls=新版 Cloudflare 自建播放器
     orientation: 'portrait',
     cover: '', liveStartAt: null, requireAccessCode: false,
@@ -446,6 +447,7 @@ function applyRoomFields(r, b) {
   if (b.bannerSubtitle !== undefined) r.bannerSubtitle = String(b.bannerSubtitle).replace(/[<>]/g, '').slice(0, 120);
   if (b.status !== undefined && ['pre', 'live', 'ended'].includes(b.status)) r.status = b.status;
   if (b.viewerBase !== undefined) r.viewerBase = Math.max(0, parseInt(b.viewerBase, 10) || 0);
+  if (b.liveDurationMin !== undefined) r.liveDurationMin = Math.max(0, parseInt(b.liveDurationMin, 10) || 0);
   if (b.videoType !== undefined && ['voomly', 'hls'].includes(b.videoType)) r.videoType = b.videoType;
   if (b.videoEmbed !== undefined) r.videoEmbed = String(b.videoEmbed).slice(0, 20000);
   if (b.hlsUrl !== undefined) r.hlsUrl = sanitizeText(b.hlsUrl, 1000);
