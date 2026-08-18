@@ -65,6 +65,7 @@ const state = {
   hlsVideo: null,      // 新版 HLS 的 <video> 元素
   hls: null,           // hls.js 实例
   hlsStarted: false,   // HLS 是否已结束预缓冲、正式起播
+  allowSeek: false,    // 白名单：我们自己在对齐播放进度（防拖看门狗此时放过 seek）
   clockOffset: 0,      // serverNow - localNow
   presets: [],         // 已按 time 排序
   shownPresetIds: new Set(),
@@ -447,14 +448,14 @@ function startBufferedPlayback(video) {
   if (state.hlsStarted) return;
   const live = state.room.status !== 'ended';
   // 先把播放点放到直播进度，让 hls 在此位置预缓冲（回放从头，不动）
-  if (live) { try { video.currentTime = elapsedSec(); } catch (e) { /* 无妨 */ } }
+  if (live) seekInternal(video, elapsedSec());
   const startedAt = performance.now();
 
   const reveal = () => {
     if (state.hlsStarted) return;
     state.hlsStarted = true;
     // 起播对齐：露出画面的这一刻 seek 到「当前」直播进度（消化预缓冲耗时），与评论时间线对齐
-    if (live) { try { video.currentTime = elapsedSec(); } catch (e) { /* 无妨 */ } }
+    if (live) seekInternal(video, elapsedSec());
     video.play().catch(() => {});
     hideSyncOverlay();
   };
@@ -469,6 +470,113 @@ function startBufferedPlayback(video) {
   tick();
 }
 
+/* ---------------------------- 反穿帮：系统级播放面板 / 原生全屏 ---------------------------- */
+// 播的是点播 m3u8，duration 是有限值 → 浏览器把它当「可自由拖动的点播文件」上报给操作系统，
+// 于是下滑控制中心/通知栏会出现带总时长的可拖进度条，一拖就暴露不是直播。
+// 页面里的 #videoGuard 只挡得住视频区域内的点击，管不到系统面板，也管不住微信 X5 的原生全屏。
+// 下面四层各自独立，环境不支持就静默退化。
+
+// 我们自己调的 seek（起播对齐、迟到者对齐）走这里，让防拖看门狗放过
+function seekInternal(video, t) {
+  state.allowSeek = true;
+  const release = () => { state.allowSeek = false; };
+  video.addEventListener('seeked', release, { once: true });
+  setTimeout(release, 1500); // 兜底：seeked 没来也要解锁
+  try { video.currentTime = t; } catch (e) { /* 无妨 */ }
+}
+
+// 第一层：元素属性——禁投屏/画中画/下载，并让微信 X5 内核留在页面内联播放
+function hardenVideoElement(video) {
+  try {
+    video.disablePictureInPicture = true;
+    video.setAttribute('disablepictureinpicture', '');
+    video.disableRemotePlayback = true;                 // 去掉系统面板上的投屏按钮
+    video.setAttribute('disableremoteplayback', '');
+    video.setAttribute('x-webkit-airplay', 'deny');     // iOS AirPlay
+    video.setAttribute('controlsList', 'nodownload noplaybackrate nofullscreen');
+    // 微信 Android / QQ 浏览器 X5 内核：不要顶成带进度条的原生全屏播放器
+    video.setAttribute('x5-playsinline', '');
+    video.setAttribute('x5-video-player-type', 'h5-page');
+    video.setAttribute('x5-video-player-fullscreen', 'false');
+    // 注意：X5 这个属性的官方拼写就是 portraint（不是 portrait），照写才生效
+    video.setAttribute('x5-video-orientation',
+      (state.room && state.room.orientation === 'portrait') ? 'portraint' : 'landscape');
+  } catch (e) { /* 无妨 */ }
+}
+
+// 第二层：被顶进全屏/画中画就立刻推回内联
+function blockFullscreen(video) {
+  const backToInline = () => {
+    try { if (video.webkitSetPresentationMode) video.webkitSetPresentationMode('inline'); } catch (e) { /* 无妨 */ }
+    try { if (video.webkitDisplayingFullscreen && video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) { /* 无妨 */ }
+    try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) { /* 无妨 */ }
+  };
+  video.addEventListener('webkitbeginfullscreen', backToInline);
+  video.addEventListener('webkitpresentationmodechanged', () => {
+    if (video.webkitPresentationMode && video.webkitPresentationMode !== 'inline') backToInline();
+  });
+  document.addEventListener('fullscreenchange', () => { if (document.fullscreenElement) backToInline(); });
+  video.addEventListener('enterpictureinpicture', () => {
+    try { document.exitPictureInPicture(); } catch (e) { /* 无妨 */ }
+  });
+}
+
+// 第三层：MediaSession——把自己上报成「时长未知的直播」，并吃掉面板上的拖动/切集/暂停
+function hardenMediaSession(video) {
+  const ms = navigator.mediaSession;
+  if (!ms) return;
+  try {
+    if (window.MediaMetadata) {
+      ms.metadata = new window.MediaMetadata({
+        title: (state.room && state.room.courseTitle) || '直播中',
+        artist: (state.room && state.room.name) || '',
+        artwork: (state.room && state.room.cover) ? [{ src: state.room.cover }] : []
+      });
+    }
+  } catch (e) { /* 无妨 */ }
+
+  // duration:Infinity 按规范即「直播/时长未知」→ 系统面板不渲染可拖进度条
+  const reportLive = () => {
+    try { ms.playbackState = 'playing'; } catch (e) { /* 无妨 */ }
+    try { ms.setPositionState({ duration: Infinity }); }
+    catch (e) { try { ms.setPositionState(); } catch (e2) { /* 无妨 */ } } // 退化：清空位置状态
+  };
+  reportLive();
+  // 播放源报出真实时长后会盖掉我们的上报，所以这几个时机都要再报一次
+  ['loadedmetadata', 'durationchange', 'playing', 'timeupdate'].forEach((ev) => {
+    let last = 0;
+    video.addEventListener(ev, () => {
+      if (ev === 'timeupdate') { // timeupdate 很密，限流到每 5s 一次
+        const t = performance.now();
+        if (t - last < 5000) return;
+        last = t;
+      }
+      reportLive();
+    });
+  });
+
+  // 注册了 handler，UA 就把动作交给我们而不是自己 seek/pause → 空实现＝面板上拖不动、暂停不了
+  ['seekto', 'seekbackward', 'seekforward', 'previoustrack', 'nexttrack', 'pause', 'stop'].forEach((a) => {
+    try { ms.setActionHandler(a, () => reportLive()); } catch (e) { /* 无妨 */ }
+  });
+}
+
+// 第四层（保险）：万一某个环境真拖动成功了，把播放点弹回去
+const SEEK_TOLERANCE = 3; // 秒：小于这个偏差算正常缓冲抖动，不干预
+function startSeekGuard(video) {
+  let good = 0; // 最后一次「合法」播放点
+  video.addEventListener('timeupdate', () => { if (!video.seeking) good = video.currentTime; });
+  video.addEventListener('seeking', () => {
+    if (!state.room || state.room.status === 'ended') return; // 回放：允许自由拖动
+    if (!state.hlsStarted || state.allowSeek) return;         // 我们自己在对齐，放过
+    // 往前偷看 → 拉回当前直播点；卡顿落后的观众 → 拉回他原来的位置，不硬推到最前面
+    const target = Math.min(good || elapsedSec(), elapsedSec());
+    if (Math.abs(video.currentTime - target) > SEEK_TOLERANCE) {
+      try { video.currentTime = target; } catch (e) { /* 无妨 */ }
+    }
+  });
+}
+
 // 用原生 <video> + hls.js 播放 Cloudflare 的 HLS 地址。直接拿到 video，seek/unmute/防暂停都一行。
 function injectHlsPlayer(url) {
   const wrap = $('#videoWrap');
@@ -478,6 +586,7 @@ function injectHlsPlayer(url) {
   video.className = 'hls-fill'; // 用 object-fit:cover 按真实比例铺满（不依赖 orientation 猜测）
   video.muted = true; video.setAttribute('playsinline', '');
   video.setAttribute('webkit-playsinline', ''); video.playsInline = true; video.preload = 'auto';
+  hardenVideoElement(video); // 反穿帮：禁投屏/画中画 + 微信 X5 内联（必须在插入 DOM 前设好）
   // 不设 autoplay：先在覆盖层后预缓冲，由 startBufferedPlayback 攒够缓冲再起播
   wrap.innerHTML = '';
   wrap.appendChild(video);
@@ -485,6 +594,10 @@ function injectHlsPlayer(url) {
   if (soundBtn) wrap.appendChild(soundBtn);  // 开声按钮在 guard 之后 → 可点
   state.hlsVideo = video;
   state.hlsStarted = false;
+  // 反穿帮其余三层：拦全屏、把自己上报成直播、拖动了就弹回
+  blockFullscreen(video);
+  hardenMediaSession(video);
+  startSeekGuard(video);
 
   const live = state.room.status !== 'ended';
   if (live) showSyncOverlay(); // 「正在同步直播进度…」盖住开头预缓冲窗口
@@ -526,7 +639,7 @@ function injectHlsPlayer(url) {
 
   // 统一播放器接口（HLS 实现）
   state.player = {
-    seek: (t) => { try { video.currentTime = t; } catch (e) { /* 无妨 */ } },
+    seek: (t) => seekInternal(video, t), // 走白名单，别被防拖看门狗拦掉
     unmute: () => { video.muted = false; video.play().catch(() => {}); },
     play: () => video.play().catch(() => {})
   };
