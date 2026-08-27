@@ -347,12 +347,13 @@ async function loadComments() {
   const list = await req('GET', '/api/admin/comments?room=' + currentRoomId);
   const tbody = $('#commentRows');
   tbody.innerHTML = '';
-  if (!list.length) { tbody.innerHTML = '<tr><td colspan="6" style="color:#8990a6">暂无用户评论</td></tr>'; return; }
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:#8990a6">暂无用户评论</td></tr>'; return; }
   for (const c of list) {
     const tr = document.createElement('tr');
     const hitMark = c.sensitiveHit ? ' <span class="tag like">含敏感词</span>' : '';
     tr.innerHTML = `
       <td style="white-space:nowrap">${fmtTime(c.createdAt)}</td>
+      <td style="white-space:nowrap">${commentTimingCell(c)}</td>
       <td>${esc(c.nickname)}</td>
       <td>${esc(c.region)}</td>
       <td><div class="cell-content">${esc(c.content)}${hitMark}</div></td>
@@ -371,11 +372,20 @@ async function loadComments() {
   tbody.querySelectorAll('[data-show]').forEach((b) => b.onclick = async () => { await req('PUT', '/api/admin/comments/' + b.dataset.show, { status: 'visible' }); reload(); });
   tbody.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (confirm('删除这条评论？')) { await req('DELETE', '/api/admin/comments/' + b.dataset.del); reload(); } });
   tbody.querySelectorAll('[data-topreset]').forEach((b) => b.onclick = async () => {
-    const t = prompt('设为开播后第几秒出现？', '0');
-    if (t === null) return;
-    await req('POST', '/api/admin/comments/' + b.dataset.topreset + '/to-preset', { time: parseInt(t, 10) || 0 });
-    toast('已加入预设互动库');
+    // 时间交给服务端按「发言时开播后第几秒」自动算（对齐当时的视频进度），后台不用再手输
+    const p = await req('POST', '/api/admin/comments/' + b.dataset.topreset + '/to-preset', {});
+    const note = p.timeSource === 'stream' ? '按开播后时间自动定位，对齐当时的视频进度'
+      : p.timeSource === 'watched' ? '本场算不出开播偏移，按该用户观看时长估算'
+      : '无时间可推算，已排到预设队尾';
+    toast(`已加入预设（${fmtDuration(p.time)}）：${note}`);
   });
+}
+
+// 「开播后」列：这条评论发在开播后第几秒（= 当时视频播到哪儿），加入预设时直接用它当出现时间
+function commentTimingCell(c) {
+  if (c.timeSource === 'stream') return fmtDuration(c.streamOffsetSec);
+  if (c.timeSource === 'watched') return `${fmtDuration(c.watchedSec)} <span class="tag hidden" title="本场算不出开播偏移（liveStartAt 已被重新开播重置），按该用户的观看时长估算">估算</span>`;
+  return '<span style="color:#8990a6">未知</span>';
 }
 
 /* ============================ 观看记录 ============================ */

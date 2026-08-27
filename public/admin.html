@@ -157,10 +157,11 @@
           <h2>用户评论管理</h2>
           <button id="refreshCommentsBtn" class="btn btn-ghost sm">刷新</button>
         </div>
+        <p class="tip">「开播后」= 这条评论是在开播后第几秒发的，也就是当时视频播到哪儿。点「加入预设」直接用它作为预设出现时间，不需要手算，评论会落回当时讲的那一段；重新开播过、算不出偏移的往场次评论，退回按该用户的观看时长估算（标注为估算，仅开播即进场的人准确）。加完想微调，去「预设互动」改时间即可。</p>
         <div class="table-wrap">
           <table class="tbl">
             <thead><tr>
-              <th>时间</th><th>昵称</th><th>地区</th><th>内容</th><th>状态</th><th>操作</th>
+              <th>时间</th><th>开播后</th><th>昵称</th><th>地区</th><th>内容</th><th>状态</th><th>操作</th>
             </tr></thead>
             <tbody id="commentRows"></tbody>
           </table>

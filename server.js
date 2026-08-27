@@ -618,9 +618,44 @@ app.post('/api/admin/presets/import', requireAdmin, (req, res) => {
 
 /* ----------------------------- 后台：用户评论 ----------------------------- */
 
+// 找出这条评论是在「哪一次观看」里发出来的：同房间 + 同 clientId，
+// 优先取发言时间落在会话区间内的那次；clientId 对不上（老数据 / anon）则退回昵称匹配。
+function findCommentSession(c) {
+  const inRoom = (db().viewerSessions || []).filter((s) => s.roomId === c.roomId);
+  const pick = (arr) => {
+    const entered = arr.filter((s) => s.enteredAt <= c.createdAt);
+    if (!entered.length) return null;
+    const covering = entered.filter((s) => c.createdAt <= (s.leftAt || s.lastSeenAt) + ONLINE_GRACE_MS);
+    const pool = covering.length ? covering : entered;
+    return pool.reduce((a, b) => (b.enteredAt > a.enteredAt ? b : a));
+  };
+  return (c.clientId && c.clientId !== 'anon' ? pick(inRoom.filter((s) => s.clientId === c.clientId)) : null)
+      || (c.nickname ? pick(inRoom.filter((s) => s.nickname === c.nickname)) : null);
+}
+
+// 评论的时间坐标（供「加入预设」自动定位，不用再手算）：
+//   streamOffsetSec = 发言时「开播后第几秒」（createdAt − liveStartAt）——首选。
+//     预设也是按开播后秒数揭示的，用它评论才会落回当时视频讲的那一段。
+//   watchedSec      = 发言时这个用户已经看了多久（createdAt − 进入直播间时间）——兜底。
+//     重新开播会重置 liveStartAt，往场次的评论算不出开播偏移，这时退回观看时长（只有开播即进场的人才等价，故标为估算）。
+function commentTiming(c) {
+  const r = getRoom(c.roomId);
+  const streamOffsetSec = r && r.liveStartAt && c.createdAt >= r.liveStartAt
+    ? Math.floor((c.createdAt - r.liveStartAt) / 1000)
+    : null;
+  const s = findCommentSession(c);
+  const watchedSec = s ? Math.max(0, Math.floor((c.createdAt - s.enteredAt) / 1000)) : null;
+  const timeSource = streamOffsetSec !== null ? 'stream' : (watchedSec !== null ? 'watched' : 'none');
+  const presetTime = timeSource === 'stream' ? streamOffsetSec : (timeSource === 'watched' ? watchedSec : null);
+  return { watchedSec, streamOffsetSec, timeSource, presetTime };
+}
+
 app.get('/api/admin/comments', requireAdmin, (req, res) => {
   const roomId = String(req.query.room || '');
-  res.json(db().comments.filter((c) => c.roomId === roomId).sort((a, b) => b.createdAt - a.createdAt));
+  res.json(db().comments
+    .filter((c) => c.roomId === roomId)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((c) => ({ ...c, ...commentTiming(c) })));
 });
 
 app.put('/api/admin/comments/:id', requireAdmin, (req, res) => {
@@ -641,16 +676,21 @@ app.delete('/api/admin/comments/:id', requireAdmin, (req, res) => {
 });
 
 // 一键把用户评论加入预设互动库
+// 出现时间不用后台手算：默认按「发言时开播后第几秒」自动定位，评论会落回当时视频讲的那一段
+//（算不出来时退回该用户的观看时长，见 commentTiming）；仍可显式传 time 覆盖；
+// 两者都拿不到时才排到现有预设队尾 +5s。
 app.post('/api/admin/comments/:id/to-preset', requireAdmin, (req, res) => {
   const c = db().comments.find((x) => x.id === req.params.id);
   if (!c) return res.status(404).json({ error: '评论不存在' });
-  // 默认出现时间取请求里的 time，没有就放到该房间现有最大时间 +5s
+  const t = commentTiming(c);
+  const manual = req.body && req.body.time !== undefined && req.body.time !== null && req.body.time !== '';
   const maxTime = db().presets.filter((p) => p.roomId === c.roomId).reduce((m, p) => Math.max(m, p.time), 0);
+  const timeSource = manual ? 'manual' : t.timeSource;
   const preset = {
     id: genId('p'),
     roomId: c.roomId,
     ...normalizePreset({
-      time: req.body.time !== undefined ? req.body.time : maxTime + 5,
+      time: manual ? req.body.time : (t.presetTime !== null ? t.presetTime : maxTime + 5),
       nickname: c.nickname,
       avatar: '',
       region: c.region,
@@ -661,7 +701,7 @@ app.post('/api/admin/comments/:id/to-preset', requireAdmin, (req, res) => {
   };
   db().presets.push(preset);
   save();
-  res.json(preset);
+  res.json({ ...preset, timeSource, watchedSec: t.watchedSec, streamOffsetSec: t.streamOffsetSec });
 });
 
 /* ----------------------------- 后台：观看记录（在线 / 进退场） ----------------------------- */
